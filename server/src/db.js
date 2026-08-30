@@ -100,6 +100,12 @@ export const deleteWidget = async (id) => {
   await sql`DELETE FROM widgets WHERE id = ${id}`;
 };
 
+export const resetUsage = async (id) => {
+  await ensureSchema();
+  const rows = await sql`UPDATE widgets SET messages_used = 0, cost_usd = 0 WHERE id = ${id} RETURNING *`;
+  return rows[0] ? toWidget(rows[0]) : null;
+};
+
 export const incrementUsage = async (id, costUsd) => {
   await ensureSchema();
   await sql`UPDATE widgets SET messages_used = messages_used + 1, cost_usd = cost_usd + ${costUsd || 0} WHERE id = ${id}`;

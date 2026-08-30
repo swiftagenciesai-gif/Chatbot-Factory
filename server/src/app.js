@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage } from './db.js';
+import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage, resetUsage } from './db.js';
 import { estimateCostUsd } from './pricing.js';
 
 const app = express();
@@ -178,6 +178,12 @@ app.patch('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (reques
 app.delete('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (request, response) => {
   await deleteWidget(request.params.id);
   return response.status(204).end();
+});
+
+app.post('/api/admin/widgets/:id/reset-usage', requireAdmin, requireDatabase, async (request, response) => {
+  const widget = await resetUsage(request.params.id);
+  if (!widget) return response.status(404).json({ error: 'Widget not found.' });
+  return response.json(withStats(widget));
 });
 
 // --- Public routes: called by widget.js from customer sites, so no admin auth here. ---

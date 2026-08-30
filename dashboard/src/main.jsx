@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check, Clipboard, Code2, LogOut, MessageCircle, Pencil, Sparkles, Trash2, X } from 'lucide-react';
+import { Check, Clipboard, Code2, LogOut, MessageCircle, Pencil, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -155,6 +155,13 @@ function App({ token, initialWidgets, onLogout }) {
     loadWidgets();
   };
 
+  const resetWidgetUsage = async (id) => {
+    if (!window.confirm('Reset messages used, cost, and hours saved back to zero for this widget? This cannot be undone.')) return;
+    const response = await adminFetch(token, `/api/admin/widgets/${id}/reset-usage`, { method: 'POST' });
+    if (response.status === 401) return onLogout();
+    if (response.ok) loadWidgets();
+  };
+
   return <main className="min-h-screen bg-[#f5f1eb] text-[#18212b]">
     <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-7 lg:px-10">
       <div className="flex items-center gap-3"><div className="brand-mark"><Sparkles size={18} /></div><span className="font-bold tracking-tight">widget<span className="text-[#d95d39]">/</span>factory</span></div>
@@ -220,6 +227,7 @@ function App({ token, initialWidgets, onLogout }) {
                       />
                       <button type="button" className="copy-button" onClick={() => saveLimit(widget.id)}>Save limit</button>
                       <button type="button" className="copy-button" onClick={() => startEdit(widget)}><Pencil size={14} /> Edit</button>
+                      <button type="button" className="copy-button" onClick={() => resetWidgetUsage(widget.id)}><RotateCcw size={14} /> Reset usage</button>
                       <button type="button" className="copy-button" onClick={() => copyText(widget.embedCode)}><Clipboard size={14} /> Copy</button>
                       <button type="button" className="copy-button" onClick={() => removeWidget(widget.id)}><Trash2 size={14} /></button>
                     </div>
