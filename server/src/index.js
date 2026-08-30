@@ -24,8 +24,11 @@ widgets.set(demoWidgetId, {
   systemPrompt: 'You are a thoughtful, concise customer support assistant. Be warm, useful, and honest when you do not know something.',
   primaryColor: '#D95D39',
   textColor: '#FFFFFF',
+  authorizedOrigins: [],
   createdAt: new Date().toISOString()
 });
+
+const adminPassword = process.env.ADMIN_PASSWORD || 'NewGame';
 
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
@@ -118,6 +121,44 @@ app.get('/api/debug-llm', async (request, response) => {
   }
 });
 
+const requireAdmin = (request, response) => {
+  if (String(request.body?.password || '') !== adminPassword) {
+    response.status(401).json({ error: 'Incorrect admin password.' });
+    return false;
+  }
+  return true;
+};
+
+app.post('/api/admin/origins/list', (request, response) => {
+  if (!requireAdmin(request, response)) return;
+  const widget = widgets.get(request.body?.widgetId || demoWidgetId);
+  if (!widget) return response.status(404).json({ error: 'Widget not found.' });
+  return response.json({ authorizedOrigins: widget.authorizedOrigins || [] });
+});
+
+app.post('/api/admin/origins/add', (request, response) => {
+  if (!requireAdmin(request, response)) return;
+  const widget = widgets.get(request.body?.widgetId || demoWidgetId);
+  if (!widget) return response.status(404).json({ error: 'Widget not found.' });
+  const url = String(request.body?.url || '').trim();
+  if (!validWebsiteUrl(url)) return response.status(400).json({ error: 'Enter a valid URL, including https://.' });
+  const host = hostnameOf(url);
+  widget.authorizedOrigins = widget.authorizedOrigins || [];
+  if (!widget.authorizedOrigins.some((existing) => hostnameOf(existing) === host)) {
+    widget.authorizedOrigins.push(url);
+  }
+  return response.json({ authorizedOrigins: widget.authorizedOrigins });
+});
+
+app.post('/api/admin/origins/remove', (request, response) => {
+  if (!requireAdmin(request, response)) return;
+  const widget = widgets.get(request.body?.widgetId || demoWidgetId);
+  if (!widget) return response.status(404).json({ error: 'Widget not found.' });
+  const host = hostnameOf(String(request.body?.url || ''));
+  widget.authorizedOrigins = (widget.authorizedOrigins || []).filter((existing) => hostnameOf(existing) !== host);
+  return response.json({ authorizedOrigins: widget.authorizedOrigins });
+});
+
 app.post('/api/widgets', (request, response) => {
   const body = request.body || {};
   if (!validHex(body.primaryColor) || !validHex(body.textColor)) {
@@ -129,6 +170,7 @@ app.post('/api/widgets', (request, response) => {
   const provider = validProvider(body.provider) ? body.provider.toLowerCase() : defaultLlmProvider;
 
   const id = crypto.randomUUID();
+  const websiteUrl = cleanText(body.websiteUrl, '', 2000);
   const widget = {
     id,
     provider,
@@ -136,7 +178,8 @@ app.post('/api/widgets', (request, response) => {
     systemPrompt: cleanText(body.systemPrompt, 'You are a helpful assistant.', 4000),
     primaryColor: body.primaryColor,
     textColor: body.textColor,
-    websiteUrl: cleanText(body.websiteUrl, '', 2000),
+    websiteUrl,
+    authorizedOrigins: [websiteUrl],
     createdAt: new Date().toISOString()
   };
   widgets.set(id, widget);
@@ -147,7 +190,7 @@ app.post('/api/widgets', (request, response) => {
 app.get('/api/widgets/:id', (request, response) => {
   const widget = widgets.get(request.params.id);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
-  const { systemPrompt: _systemPrompt, provider: _provider, websiteUrl: _websiteUrl, ...publicConfig } = widget;
+  const { systemPrompt: _systemPrompt, provider: _provider, websiteUrl: _websiteUrl, authorizedOrigins: _authorizedOrigins, ...publicConfig } = widget;
   return response.json(publicConfig);
 });
 
@@ -158,10 +201,12 @@ app.post('/api/chat', async (request, response) => {
   if (messages.length > 30) return response.status(400).json({ error: 'Conversation is too long.' });
 
   const originHeader = request.get('origin') || request.get('referer');
-  if (widget.websiteUrl && originHeader) {
-    const allowedHost = hostnameOf(widget.websiteUrl);
-    const requestHost = hostnameOf(originHeader);
-    if (allowedHost && requestHost && allowedHost !== requestHost) {
+  const requestHost = originHeader ? hostnameOf(originHeader) : null;
+  const authorizedOrigins = widget.authorizedOrigins || [];
+  if (requestHost && authorizedOrigins.length > 0) {
+    const selfHost = hostnameOf(resolveBaseUrl(request));
+    const allowedHosts = authorizedOrigins.map(hostnameOf).filter(Boolean);
+    if (requestHost !== selfHost && !allowedHosts.includes(requestHost)) {
       return response.status(403).json({ error: 'This widget is not authorized for this website.' });
     }
   }

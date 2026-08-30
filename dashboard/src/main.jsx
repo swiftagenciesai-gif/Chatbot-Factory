@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, Clipboard, Code2, MessageCircle, Sparkles } from 'lucide-react';
+import { Check, Clipboard, Code2, Lock, MessageCircle, Shield, Sparkles, Trash2, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -26,6 +26,7 @@ function App() {
   const [embedCode, setEmbedCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState('');
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const update = (event) => setForm({ ...form, [event.target.name]: event.target.value });
   const isColorField = (name) => name === 'primaryColor' || name === 'textColor';
@@ -63,8 +64,12 @@ function App() {
   return <main className="min-h-screen bg-[#f5f1eb] text-[#18212b]">
     <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-7 lg:px-10">
       <div className="flex items-center gap-3"><div className="brand-mark"><Sparkles size={18} /></div><span className="font-bold tracking-tight">widget<span className="text-[#d95d39]">/</span>factory</span></div>
-      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7d817f]">Configuration studio</span>
+      <div className="flex items-center gap-5">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7d817f]">Configuration studio</span>
+        <button type="button" onClick={() => setAdminOpen(true)} className="admin-trigger" aria-label="Admin"><Shield size={16} /> Admin</button>
+      </div>
     </nav>
+    {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
     <div className="mx-auto grid max-w-7xl gap-10 px-6 pb-16 lg:grid-cols-[1fr_0.9fr] lg:px-10">
       <section className="pt-8 lg:pt-16">
         <p className="eyebrow">Ship a helpful presence</p>
@@ -84,6 +89,73 @@ function App() {
       <section className="preview-wrap lg:pt-20"><div className="preview-label"><span className="live-dot" /> Live preview</div><div className="preview-canvas"><div className="site-lines"><span /><span /><span /></div><div className="fake-site-title">A quieter way to get help.</div><div className="fake-site-copy">Good support should feel close, clear, and human.</div><div className="preview-widget"><div className="preview-header" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><span>{form.name || 'Assistant'}</span><span>×</span></div><div className="preview-messages"><div className="preview-bubble assistant-bubble">Hi, I’m {form.name || 'your assistant'}. How can I help?</div><div className="preview-bubble user-bubble" style={{ backgroundColor: form.primaryColor, color: form.textColor }}>Tell me more</div></div><div className="preview-input">Ask a question... <span>↑</span></div></div><div className="preview-fab" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><MessageCircle size={23} /></div></div></section>
     </div>
   </main>;
+}
+
+function AdminPanel({ onClose }) {
+  const [password, setPassword] = useState('');
+  const [unlocked, setUnlocked] = useState(false);
+  const [origins, setOrigins] = useState([]);
+  const [newUrl, setNewUrl] = useState('');
+  const [error, setError] = useState('');
+
+  const call = async (path, extra) => {
+    const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, ...extra }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+    return data;
+  };
+
+  const unlock = async (event) => {
+    event.preventDefault();
+    setError('');
+    try {
+      const data = await call('/api/admin/origins/list');
+      setOrigins(data.authorizedOrigins);
+      setUnlocked(true);
+    } catch (err) { setError(err.message); }
+  };
+
+  const authorize = async (event) => {
+    event.preventDefault();
+    setError('');
+    try {
+      const data = await call('/api/admin/origins/add', { url: newUrl });
+      setOrigins(data.authorizedOrigins);
+      setNewUrl('');
+    } catch (err) { setError(err.message); }
+  };
+
+  const revoke = async (url) => {
+    setError('');
+    try {
+      const data = await call('/api/admin/origins/remove', { url });
+      setOrigins(data.authorizedOrigins);
+    } catch (err) { setError(err.message); }
+  };
+
+  return <div className="admin-overlay" onClick={onClose}>
+    <div className="admin-card" onClick={(event) => event.stopPropagation()}>
+      <div className="mb-4 flex items-center justify-between">
+        <span className="eyebrow flex items-center gap-2">{unlocked ? <Shield size={14} /> : <Lock size={14} />} Admin</span>
+        <button type="button" onClick={onClose} className="copy-button" aria-label="Close"><X size={15} /></button>
+      </div>
+      {!unlocked ? <form onSubmit={unlock} className="space-y-4">
+        <Field label="Password" hint="Required"><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoFocus required /></Field>
+        {error && <p className="text-sm font-semibold text-[#d95d39]">{error}</p>}
+        <button className="primary-button" type="submit"><Lock size={16} /> Unlock</button>
+      </form> : <div className="space-y-5">
+        <p className="text-sm text-[#69716f]">Authorizing a website lets the chatbot respond when embedded there. Once at least one site is authorized, only those sites (plus this one) can use it.</p>
+        <form onSubmit={authorize} className="flex items-end gap-3">
+          <div className="flex-1"><Field label="Authorize a website" hint="Full URL"><input type="url" value={newUrl} onChange={(event) => setNewUrl(event.target.value)} placeholder="https://example.com" required /></Field></div>
+          <button className="primary-button" type="submit">Add</button>
+        </form>
+        {error && <p className="text-sm font-semibold text-[#d95d39]">{error}</p>}
+        {origins.length === 0 ? <p className="text-sm text-[#69716f]">No sites authorized yet — the chatbot currently responds anywhere it's embedded.</p> : <ul className="admin-origin-list">
+          {origins.map((url) => <li key={url}><span>{url}</span><button type="button" onClick={() => revoke(url)} aria-label={`Remove ${url}`}><Trash2 size={15} /></button></li>)}
+        </ul>}
+      </div>}
+    </div>
+  </div>;
 }
 
 function Field({ label, hint, children }) { return <label className="field"><span className="flex justify-between"><strong>{label}</strong><small>{hint}</small></span>{children}</label>; }
