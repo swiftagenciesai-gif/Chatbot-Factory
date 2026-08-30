@@ -5,10 +5,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage, resetUsage } from './db.js';
+import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage, resetUsage, updateAlertThreshold } from './db.js';
 import { estimateCostUsd } from './pricing.js';
+import { sendUsageAlert } from './notify.js';
 
 const app = express();
+// Vercel (and most PaaS) sit in front of the app behind a proxy - without this,
+// req.ip resolves to the proxy's address instead of the visitor's, which would
+// make the chat rate limiter below key on a single shared IP.
+app.set('trust proxy', true);
 const publicBaseUrl = (
   process.env.PUBLIC_BASE_URL ||
   (process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`) ||
@@ -62,6 +67,48 @@ const requireDatabase = (request, response, next) => {
   if (!hasDatabase()) return response.status(500).json({ error: 'DATABASE_URL is not configured on the server.' });
   return next();
 };
+
+// Best-effort protection against a widget's embed being copied onto another
+// site: if the widget has a websiteUrl on file, its hostname must match the
+// browser's Origin header. A request with no Origin (curl, some non-browser
+// clients) is allowed through, since there's nothing to check - this raises
+// the bar against casual copy-paste reuse, it isn't a hard security boundary.
+const originAllowed = (request, widget) => {
+  if (!widget.websiteUrl) return true;
+  const origin = request.get('origin');
+  if (!origin) return true;
+  try {
+    return new URL(origin).hostname === new URL(widget.websiteUrl).hostname;
+  } catch {
+    return true;
+  }
+};
+
+// Simple in-memory fixed-window limiter, keyed per widget+IP. Because each
+// serverless instance has its own memory, this isn't a perfectly accurate
+// global limit under Vercel's autoscaling - but it does stop a single script
+// or browser tab from hammering one widget's LLM budget, which is the actual
+// risk being guarded against here.
+const chatRateLimitWindowMs = 60_000;
+const chatRateLimitMax = Number(process.env.CHAT_RATE_LIMIT_PER_MINUTE) || 20;
+const chatRateLimitBuckets = new Map();
+const isChatRateLimited = (key) => {
+  const now = Date.now();
+  if (Math.random() < 0.01) {
+    for (const [bucketKey, bucket] of chatRateLimitBuckets) {
+      if (now - bucket.windowStart > chatRateLimitWindowMs) chatRateLimitBuckets.delete(bucketKey);
+    }
+  }
+  const bucket = chatRateLimitBuckets.get(key);
+  if (!bucket || now - bucket.windowStart > chatRateLimitWindowMs) {
+    chatRateLimitBuckets.set(key, { count: 1, windowStart: now });
+    return false;
+  }
+  bucket.count += 1;
+  return bucket.count > chatRateLimitMax;
+};
+
+const ALERT_THRESHOLDS = [95, 90, 75];
 
 const requestChatCompletion = async (provider, systemPrompt, messages) => {
   if (provider === 'anthropic') {
@@ -191,7 +238,8 @@ app.post('/api/admin/widgets/:id/reset-usage', requireAdmin, requireDatabase, as
 app.get('/api/widgets/:id', requireDatabase, async (request, response) => {
   const widget = await getWidget(request.params.id);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
-  const { systemPrompt: _systemPrompt, provider: _provider, messageLimit: _messageLimit, messagesUsed: _messagesUsed, costUsd: _costUsd, ...publicConfig } = widget;
+  if (!originAllowed(request, widget)) return response.status(403).json({ error: 'This widget is not authorized for this site.' });
+  const { systemPrompt: _systemPrompt, provider: _provider, messageLimit: _messageLimit, messagesUsed: _messagesUsed, costUsd: _costUsd, lastAlertThreshold: _lastAlertThreshold, ...publicConfig } = widget;
   return response.json(publicConfig);
 });
 
@@ -202,15 +250,27 @@ app.post('/api/chat', requireDatabase, async (request, response) => {
 
   const widget = await getWidget(widgetId);
   if (!widget) return response.status(400).json({ error: 'A valid widgetId and messages are required.' });
+  if (!originAllowed(request, widget)) return response.status(403).json({ error: 'This widget is not authorized for this site.' });
   if (widget.messageLimit !== null && widget.messagesUsed >= widget.messageLimit) {
     return response.status(402).json({ error: 'This widget has reached its message limit. Contact the site owner to increase it.' });
+  }
+  if (isChatRateLimited(`${widget.id}:${request.ip}`)) {
+    return response.status(429).json({ error: 'Too many messages sent too quickly. Please wait a moment and try again.' });
   }
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
   try {
     const completion = await requestChatCompletion(widget.provider || defaultLlmProvider, widget.systemPrompt, safeMessages);
     const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
-    await incrementUsage(widget.id, costUsd);
+    const updated = await incrementUsage(widget.id, costUsd);
+    if (updated && updated.messageLimit) {
+      const percentage = (updated.messagesUsed / updated.messageLimit) * 100;
+      const crossed = ALERT_THRESHOLDS.find((t) => percentage >= t && updated.lastAlertThreshold < t);
+      if (crossed) {
+        updateAlertThreshold(updated.id, crossed).catch(() => {});
+        sendUsageAlert({ widget: updated, messagesUsed: updated.messagesUsed, percentage, threshold: crossed }).catch(() => {});
+      }
+    }
     return response.json({ message: completion.message });
   } catch (error) {
     const message = error.message || 'Unable to reach the LLM provider.';

@@ -25,6 +25,7 @@ Customer site <- generated <script data-widget-id="..." src=".../widget.js">
 2. `ADMIN_PASSWORD` — a password of your choosing. Required to use the dashboard's admin panel (create/list/edit/delete widgets) at all; without it, every `/api/admin/*` route returns 500.
 3. `PUBLIC_BASE_URL` — the project's stable Production domain (Project -> Domains -> the entry with no random hash, e.g. `https://your-project.vercel.app`, or a custom domain). Without it, generated embed snippets fall back to `http://localhost:3001`, which does not work from a real website.
 4. `OPENAI_API_KEY` or (`LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`) so `/api/chat` can actually reach a model. This key is shared by every widget created through the dashboard — use each widget's message limit (below) to bound what a single customer can cost you.
+5. `ALERT_WEBHOOK_URL` (optional) — a Slack or Discord incoming webhook URL. When set, you get pinged the moment any widget crosses 75%, 90%, or 95% of its message limit. Leave unset for no notifications.
 
 ### Persistence
 
@@ -42,6 +43,16 @@ The dashboard at your Production domain is a password gate first (enter `ADMIN_P
 - delete (immediately and permanently breaks that widget's embed — customer sites calling it will get a 404; nothing recreates it afterward)
 
 The password is kept in `sessionStorage` only (cleared when the tab closes); there is no per-admin-user login, just the one shared password. Good enough for one operator; add real auth (e.g. per-user accounts) before handing dashboard access to a team.
+
+### Usage alerts
+
+Set `ALERT_WEBHOOK_URL` to a Slack or Discord incoming webhook URL (both accept the same JSON shape this sends: `{"text": "...", "content": "..."}`, so either works with no extra config) to get notified when a widget's usage crosses 75%, 90%, or 95% of its message limit. Each threshold fires once per widget — raising or lowering the message limit (via Edit or the inline limit field) resets which thresholds have already fired, since the percentage basis changed. Widgets with no message limit set never trigger an alert, since there's no ceiling to measure against. A missing/unreachable webhook URL fails silently — it never blocks or slows down a chat reply.
+
+### Origin lock and rate limiting on `/api/chat`
+
+If a widget has a `websiteUrl` set, `/api/chat` (and the config fetch in `/api/widgets/:id`) check the browser's `Origin` header against it and reject a mismatch with `403` — this stops someone from copy-pasting another company's embed script onto their own site and running up that widget's message limit and your API cost. It's best-effort, not a hard security boundary: a request with no `Origin` header (non-browser tools) is let through, since there's nothing to check.
+
+`/api/chat` also rate-limits to `CHAT_RATE_LIMIT_PER_MINUTE` (default 20) requests per minute per widget+IP, returning `429` past that. This is an in-memory limiter, so on Vercel's autoscaling it's per-instance, not perfectly global — good enough to stop one script or browser tab from hammering a widget, not a substitute for a shared store like Redis if you need an exact global limit later.
 
 ## Run locally
 
@@ -81,14 +92,13 @@ ANTHROPIC_MODEL=claude-sonnet-5
 
 ## Production shape
 
-Done: Postgres persistence, a password-gated admin panel, and per-widget message limits.
+Done: Postgres persistence, a password-gated admin panel, per-widget message limits, per-widget cost/hours-saved tracking, usage-threshold alerts, a best-effort origin lock, and per-widget+IP rate limiting on `/api/chat`.
 
 Still worth adding before scaling past a handful of customers:
 
 1. Per-admin-user accounts instead of one shared password, if more than one person manages widgets.
-2. Rate limiting and request size limits on `/api/chat` (message length and conversation length are already capped) and an origin allowlist keyed to each widget's `websiteUrl`, so a widget only answers requests referred from the site it was made for.
-3. Usage-based alerts (e.g. email at 80% of a widget's message limit) rather than only a hard cutoff at 100%.
-4. Moderation on model output before it reaches the customer's visitors.
+2. A shared store (e.g. Redis) for the chat rate limiter, if you need an exact global limit rather than the current per-instance one.
+3. Moderation on model output before it reaches the customer's visitors.
 
 ## API
 
@@ -101,7 +111,7 @@ Admin routes require `Authorization: Bearer <ADMIN_PASSWORD>`:
 
 Public routes, called by `widget.js` from customer sites:
 
-- `GET /api/widgets/:id` returns the widget's visual configuration (name/colors), never the system prompt or usage data.
-- `POST /api/chat` accepts `{ widgetId, messages }`, returns `{ message }`, and returns `402` once a widget's message limit is reached.
+- `GET /api/widgets/:id` returns the widget's visual configuration (name/colors), never the system prompt or usage data. Returns `403` if the widget has a `websiteUrl` set and the request's `Origin` doesn't match it.
+- `POST /api/chat` accepts `{ widgetId, messages }`, returns `{ message }`. Returns `403` on an origin mismatch (see above), `402` once a widget's message limit is reached, and `429` past `CHAT_RATE_LIMIT_PER_MINUTE` requests/minute for that widget+IP.
 - `GET /widget.js` serves the exact vanilla JavaScript IIFE used by the embed snippet.
 - `GET /health` reports `{ ok, database }` — `database: false` means `DATABASE_URL` is missing.
