@@ -4,11 +4,14 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 
 const initial = {
+  provider: 'anthropic',
   name: 'Nova',
   systemPrompt: 'You are a thoughtful, concise customer support assistant. Be warm, useful, and honest when you do not know something.',
   primaryColor: '#D95D39',
   textColor: '#FFFFFF'
 };
+
+const isValidHexColor = (value) => /^#[0-9A-Fa-f]{6}$/.test(String(value || ''));
 
 function App() {
   const [form, setForm] = useState(initial);
@@ -20,16 +23,20 @@ function App() {
   const isColorField = (name) => name === 'primaryColor' || name === 'textColor';
   const handleColorChange = (event) => {
     const { name, value } = event.target;
-    const sanitized = value.trim();
     if (!isColorField(name)) {
       update(event);
       return;
     }
+    const sanitized = String(value || '').trim();
     const nextValue = sanitized.startsWith('#') ? sanitized : `#${sanitized}`;
-    setForm((current) => ({ ...current, [name]: /^#[0-9A-Fa-f]{6}$/.test(nextValue) ? nextValue : current[name] }));
+    setForm((current) => ({ ...current, [name]: nextValue }));
   };
   const createWidget = async (event) => {
     event.preventDefault();
+    if (!isValidHexColor(form.primaryColor) || !isValidHexColor(form.textColor)) {
+      setStatus('Colors must be valid six-digit hex values like #D95D39.');
+      return;
+    }
     setStatus('Creating widget...');
     try {
       const response = await fetch('/api/widgets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
@@ -51,7 +58,8 @@ function App() {
         <p className="eyebrow">Ship a helpful presence</p>
         <h1 className="display mt-4 max-w-xl">Your AI, in every conversation.</h1>
         <p className="mt-5 max-w-lg text-lg leading-8 text-[#69716f]">Shape the personality and palette. We will hand you one clean script tag for any website.</p>
-        <form onSubmit={createWidget} className="mt-10 space-y-7">
+        <form onSubmit={createWidget} noValidate className="mt-10 space-y-7">
+          <Field label="AI provider" hint="Model backend"><select name="provider" value={form.provider} onChange={update}><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option></select></Field>
           <Field label="Widget name" hint="Shown in the chat header"><input name="name" value={form.name} onChange={update} required /></Field>
           <Field label="System prompt" hint="Sets the assistant's behavior"><textarea name="systemPrompt" rows="4" value={form.systemPrompt} onChange={update} required /></Field>
           <div className="grid gap-5 sm:grid-cols-2"><ColorField label="Primary color" name="primaryColor" value={form.primaryColor} onChange={handleColorChange} /><ColorField label="Text color" name="textColor" value={form.textColor} onChange={handleColorChange} /></div>
@@ -66,6 +74,8 @@ function App() {
 }
 
 function Field({ label, hint, children }) { return <label className="field"><span className="flex justify-between"><strong>{label}</strong><small>{hint}</small></span>{children}</label>; }
-function ColorField({ label, name, value, onChange }) { return <Field label={label} hint="Hex code"><div className="color-input"><input type="color" value={value} onChange={onChange} name={name} /><input name={name} value={value} onChange={onChange} title="Use a six-digit hex color like #D95D39" required /></div></Field>; }
+function ColorField({ label, name, value, onChange }) {
+  return <Field label={label} hint="Hex code"><div className="color-input"><input type="color" value={isValidHexColor(value) ? value : '#000000'} onChange={onChange} name={name} /><input name={name} value={value} onChange={onChange} title="Use a six-digit hex color like #D95D39" /></div></Field>;
+}
 
 createRoot(document.getElementById('root')).render(<App />);

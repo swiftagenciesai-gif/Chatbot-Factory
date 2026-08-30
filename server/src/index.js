@@ -11,13 +11,14 @@ const port = Number(process.env.PORT || 3001);
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${port}`;
 const widgets = new Map();
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/widget.js');
-const llmProvider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+const defaultLlmProvider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
 
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
 
 const validHex = (value) => /^#[0-9a-f]{6}$/i.test(value || '');
 const cleanText = (value, fallback, max) => String(value || fallback).trim().slice(0, max);
+const validProvider = (value) => ['openai', 'anthropic'].includes(String(value || '').toLowerCase());
 
 const requestChatCompletion = async (provider, systemPrompt, messages) => {
   if (provider === 'anthropic') {
@@ -68,10 +69,12 @@ app.post('/api/widgets', (request, response) => {
   if (!validHex(body.primaryColor) || !validHex(body.textColor)) {
     return response.status(400).json({ error: 'Colors must be six-digit hex values.' });
   }
+  const provider = validProvider(body.provider) ? body.provider.toLowerCase() : defaultLlmProvider;
 
   const id = crypto.randomUUID();
   const widget = {
     id,
+    provider,
     name: cleanText(body.name, 'Assistant', 60),
     systemPrompt: cleanText(body.systemPrompt, 'You are a helpful assistant.', 4000),
     primaryColor: body.primaryColor,
@@ -85,7 +88,7 @@ app.post('/api/widgets', (request, response) => {
 app.get('/api/widgets/:id', (request, response) => {
   const widget = widgets.get(request.params.id);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
-  const { systemPrompt: _systemPrompt, ...publicConfig } = widget;
+  const { systemPrompt: _systemPrompt, provider: _provider, ...publicConfig } = widget;
   return response.json(publicConfig);
 });
 
@@ -97,7 +100,7 @@ app.post('/api/chat', async (request, response) => {
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
   try {
-    const message = await requestChatCompletion(llmProvider, widget.systemPrompt, safeMessages);
+    const message = await requestChatCompletion(widget.provider || defaultLlmProvider, widget.systemPrompt, safeMessages);
     return response.json({ message });
   } catch (error) {
     const message = error.message || 'Unable to reach the LLM provider.';
