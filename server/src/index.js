@@ -68,7 +68,11 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
       },
       body: JSON.stringify(body)
     });
-    if (!response.ok) throw new Error('Anthropic request failed.');
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      console.error('Anthropic request failed', response.status, detail);
+      throw new Error(`Anthropic request failed (status ${response.status}).`);
+    }
     const result = await response.json();
     return result.content?.[0]?.text || 'I could not produce a response.';
   }
@@ -85,7 +89,11 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
       messages: [{ role: 'system', content: systemPrompt }, ...messages]
     })
   });
-  if (!response.ok) throw new Error('OpenAI request failed.');
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    console.error('OpenAI request failed', response.status, detail);
+    throw new Error(`OpenAI request failed (status ${response.status}).`);
+  }
   const result = await response.json();
   return result.choices?.[0]?.message?.content || 'I could not produce a response.';
 };
