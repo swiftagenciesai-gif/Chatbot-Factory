@@ -33,6 +33,10 @@ export const ensureSchema = () => {
       await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS opening_message text NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS cost_usd numeric(12,6) NOT NULL DEFAULT 0`;
       await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS last_alert_threshold integer NOT NULL DEFAULT 0`;
+      // Which of the operator's standard capabilities (see CAPABILITIES in
+      // app.js) this widget was built for - purely a bookkeeping/reference
+      // tag for the admin panel, not read by the chat route itself.
+      await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '[]'::jsonb`;
     })();
   }
   return schemaReady;
@@ -51,14 +55,15 @@ const toWidget = (row) => ({
   messagesUsed: row.messages_used,
   costUsd: Number(row.cost_usd),
   lastAlertThreshold: row.last_alert_threshold,
+  capabilities: Array.isArray(row.capabilities) ? row.capabilities : [],
   createdAt: row.created_at
 });
 
 export const insertWidget = async (widget) => {
   await ensureSchema();
   const rows = await sql`
-    INSERT INTO widgets (id, provider, name, system_prompt, primary_color, text_color, website_url, opening_message, message_limit)
-    VALUES (${widget.id}, ${widget.provider}, ${widget.name}, ${widget.systemPrompt}, ${widget.primaryColor}, ${widget.textColor}, ${widget.websiteUrl}, ${widget.openingMessage}, ${widget.messageLimit})
+    INSERT INTO widgets (id, provider, name, system_prompt, primary_color, text_color, website_url, opening_message, message_limit, capabilities)
+    VALUES (${widget.id}, ${widget.provider}, ${widget.name}, ${widget.systemPrompt}, ${widget.primaryColor}, ${widget.textColor}, ${widget.websiteUrl}, ${widget.openingMessage}, ${widget.messageLimit}, ${JSON.stringify(widget.capabilities || [])}::jsonb)
     ON CONFLICT (id) DO NOTHING
     RETURNING *
   `;
@@ -94,6 +99,7 @@ export const updateWidget = async (id, patch) => {
       website_url = ${next.websiteUrl},
       opening_message = ${next.openingMessage},
       message_limit = ${next.messageLimit},
+      capabilities = ${JSON.stringify(next.capabilities || [])}::jsonb,
       last_alert_threshold = ${resetAlert ? 0 : current.lastAlertThreshold}
     WHERE id = ${id}
     RETURNING *
