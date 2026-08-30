@@ -22,8 +22,10 @@
       .replace(/>/g, '&gt;');
   }
 
-  function linkify(text) {
-    return escapeHtml(text).replace(/https?:\/\/[^\s<]+[^\s<.,)]/g, function (url) {
+  function formatContent(text) {
+    var escaped = escapeHtml(text);
+    var bolded = escaped.replace(/\*\*([^*<>]+)\*\*/g, '<strong>$1</strong>');
+    return bolded.replace(/https?:\/\/[^\s<]+[^\s<.,)]/g, function (url) {
       return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
     });
   }
@@ -72,6 +74,7 @@
       '.messages{flex:1;padding:16px;overflow-y:auto;background:#f7f7f9;display:flex;flex-direction:column;gap:10px}' +
       '.bubble{max-width:84%;padding:10px 14px;border-radius:18px;white-space:pre-wrap;word-wrap:break-word;line-height:1.48;font-size:14.5px}' +
       '.bubble a{color:inherit;text-decoration:underline}' +
+      '.bubble strong{font-weight:700}' +
       '.user{align-self:flex-end;background:' + config.primaryColor + ';color:' + config.textColor + ';border-bottom-right-radius:6px}' +
       '.assistant{align-self:flex-start;background:#fff;color:#1a1d21;border:1px solid #ececef;border-bottom-left-radius:6px;box-shadow:0 1px 2px rgba(15,15,20,.03)}' +
       '.typing{align-self:flex-start;display:flex;gap:4px;padding:13px 16px;background:#fff;border:1px solid #ececef;border-radius:18px;border-bottom-left-radius:6px}' +
@@ -98,7 +101,7 @@
 
     var messages = el('div', { class: 'messages' });
     state.messages.forEach(function (message) {
-      messages.appendChild(el('div', { class: 'bubble ' + message.role }, linkify(message.content)));
+      messages.appendChild(el('div', { class: 'bubble ' + message.role }, formatContent(message.content)));
     });
     if (state.busy) {
       messages.appendChild(el('div', { class: 'typing', 'aria-label': 'Assistant is typing' }, '<span></span><span></span><span></span>'));
@@ -114,12 +117,14 @@
     form.onsubmit = function (event) { event.preventDefault(); sendMessage(input); };
 
     panel.append(head, messages, form);
-    messages.scrollTop = messages.scrollHeight;
 
     var fab = el('button', { class: 'fab', 'aria-label': state.open ? 'Close chat' : 'Open chat', type: 'button' }, state.open ? closeIcon : chatIcon);
     fab.onclick = function () { state.open = !state.open; render(); };
 
     root.append(panel, fab);
+    // Must happen after the panel is actually in the document - scrollHeight
+    // on a still-detached element isn't reliably the final laid-out height.
+    messages.scrollTop = messages.scrollHeight;
     if (state.open) input.focus();
   }
 
