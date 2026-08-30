@@ -78,6 +78,7 @@ const seedWidgetOnce = async () => {
       primaryColor: validHex(process.env.SEED_WIDGET_PRIMARY_COLOR) ? process.env.SEED_WIDGET_PRIMARY_COLOR : '#D95D39',
       textColor: validHex(process.env.SEED_WIDGET_TEXT_COLOR) ? process.env.SEED_WIDGET_TEXT_COLOR : '#FFFFFF',
       websiteUrl: cleanWebsiteUrl(process.env.SEED_WIDGET_WEBSITE_URL),
+      openingMessage: cleanText(process.env.SEED_WIDGET_OPENING_MESSAGE, '', 500),
       messageLimit: cleanMessageLimit(process.env.SEED_WIDGET_MESSAGE_LIMIT)
     });
   } catch {
@@ -91,7 +92,7 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
     if (!apiKey) throw new Error('Anthropic API key is not configured on the server.');
     const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
     const body = {
-      model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest',
+      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
       system: systemPrompt,
       max_tokens: 1024,
       messages: messages.map(({ role, content }) => ({ role, content: String(content || '') }))
@@ -154,6 +155,7 @@ app.post('/api/admin/widgets', requireAdmin, requireDatabase, async (request, re
     primaryColor: body.primaryColor,
     textColor: body.textColor,
     websiteUrl: cleanWebsiteUrl(body.websiteUrl),
+    openingMessage: cleanText(body.openingMessage, '', 500),
     messageLimit: cleanMessageLimit(body.messageLimit)
   });
   return response.status(201).json({ ...widget, embedCode: embedCodeFor(widget.id) });
@@ -170,6 +172,7 @@ app.patch('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (reques
   if (body.name !== undefined) patch.name = cleanText(body.name, 'Assistant', 60);
   if (body.systemPrompt !== undefined) patch.systemPrompt = cleanText(body.systemPrompt, 'You are a helpful assistant.', 4000);
   if (body.websiteUrl !== undefined) patch.websiteUrl = cleanWebsiteUrl(body.websiteUrl);
+  if (body.openingMessage !== undefined) patch.openingMessage = cleanText(body.openingMessage, '', 500);
   if (body.messageLimit !== undefined) patch.messageLimit = cleanMessageLimit(body.messageLimit);
   if (body.primaryColor !== undefined && validHex(body.primaryColor)) patch.primaryColor = body.primaryColor;
   if (body.textColor !== undefined && validHex(body.textColor)) patch.textColor = body.textColor;

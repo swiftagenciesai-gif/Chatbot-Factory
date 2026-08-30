@@ -24,6 +24,7 @@
     fetch(apiBase + '/api/widgets/' + encodeURIComponent(widgetId)).then(function (res) { return res.json(); }).then(function (config) {
       if (!config.id) throw new Error('Widget config unavailable');
       state.config = config;
+      if (config.openingMessage) state.messages.push({ role: 'assistant', content: config.openingMessage });
       render();
     }).catch(function () { /* A failed config should not disturb the host page. */ });
   }
