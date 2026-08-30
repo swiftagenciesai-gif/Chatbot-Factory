@@ -36,4 +36,5 @@ body { margin: 0; }
 .test-chat-bubble.assistant { align-self: flex-start; background: #fff; border: 1px solid #e2e3e7; }
 .test-chat form input { flex: 1; min-width: 0; border: 1px solid #d8d5ce; border-radius: 8px; padding: 9px 12px; font: inherit; font-size: 13px; outline: none; }
 .test-chat form input:focus { border-color: #d95d39; }
+.capability-tag { display: inline-block; border-radius: 999px; background: #f0ece2; padding: 2px 9px; color: #69716f; font-size: 11px; font-weight: 600; }
 @media (max-width: 640px) { .preview-canvas { min-height: 520px; padding: 24px; }.fake-site-title { margin-top: 70px; font-size: 34px; }.preview-widget { right: 20px; bottom: 100px; }.preview-fab { right: 20px; bottom: 22px; } }

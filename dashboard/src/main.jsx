@@ -10,8 +10,20 @@ const initial = {
   textColor: '#FFFFFF',
   websiteUrl: '',
   openingMessage: 'Hi! How can I help you today?',
-  messageLimit: ''
+  messageLimit: '',
+  capabilities: []
 };
+
+// Matches CAPABILITIES in server/src/app.js - keep the two in sync.
+const CAPABILITIES = [
+  'Lead generation',
+  'Rapid customer support',
+  'Appointment booking',
+  'Ongoing support and optimization',
+  'Sophisticated AI behavior',
+  'AI-to-AI workflows',
+  'Advanced chatbot management'
+];
 
 const TOKEN_KEY = 'chatbotFactoryAdminToken';
 const isValidHexColor = (value) => /^#[0-9A-Fa-f]{6}$/.test(String(value || ''));
@@ -90,6 +102,12 @@ function App({ token, initialWidgets, onLogout }) {
     const nextValue = sanitized.startsWith('#') ? sanitized : `#${sanitized}`;
     setForm((current) => ({ ...current, [name]: nextValue }));
   };
+  const toggleCapability = (capability) => setForm((current) => ({
+    ...current,
+    capabilities: current.capabilities.includes(capability)
+      ? current.capabilities.filter((item) => item !== capability)
+      : [...current.capabilities, capability]
+  }));
   const createWidget = async (event) => {
     event.preventDefault();
     if (!isValidHexColor(form.primaryColor) || !isValidHexColor(form.textColor)) {
@@ -128,11 +146,18 @@ function App({ token, initialWidgets, onLogout }) {
       websiteUrl: widget.websiteUrl || '',
       openingMessage: widget.openingMessage || '',
       primaryColor: widget.primaryColor,
-      textColor: widget.textColor
+      textColor: widget.textColor,
+      capabilities: widget.capabilities || []
     });
   };
   const cancelEdit = () => { setEditingId(null); setEditDraft(null); };
   const updateEditDraft = (event) => setEditDraft({ ...editDraft, [event.target.name]: event.target.value });
+  const toggleEditCapability = (capability) => setEditDraft((current) => ({
+    ...current,
+    capabilities: current.capabilities.includes(capability)
+      ? current.capabilities.filter((item) => item !== capability)
+      : [...current.capabilities, capability]
+  }));
   const saveEdit = async (id) => {
     if (!isValidHexColor(editDraft.primaryColor) || !isValidHexColor(editDraft.textColor)) {
       setEditStatus('Colors must be valid six-digit hex values like #D95D39.');
@@ -183,6 +208,7 @@ function App({ token, initialWidgets, onLogout }) {
           <Field label="Website URL" hint="Where this widget will be embedded"><input name="websiteUrl" type="url" placeholder="https://example.com" value={form.websiteUrl} onChange={update} /></Field>
           <Field label="What would you like the opening message to be?" hint="Shown as the first bubble when chat opens; blank = none"><textarea name="openingMessage" rows="2" placeholder="Hi! How can I help you today?" value={form.openingMessage} onChange={update} /></Field>
           <Field label="Message limit" hint="Blank = unlimited"><input name="messageLimit" type="number" min="0" placeholder="e.g. 500" value={form.messageLimit} onChange={update} /></Field>
+          <CapabilityPicker label="Capabilities" hint="What this widget was built for - reference only" value={form.capabilities} onToggle={toggleCapability} />
           <div className="grid gap-5 sm:grid-cols-2"><ColorField label="Primary color" name="primaryColor" value={form.primaryColor} onChange={handleColorChange} /><ColorField label="Text color" name="textColor" value={form.textColor} onChange={handleColorChange} /></div>
           <button className="primary-button" type="submit"><Code2 size={18} /> Generate embed code</button>
           {status && <p className="text-sm font-semibold text-[#69716f]">{status}</p>}
@@ -202,6 +228,7 @@ function App({ token, initialWidgets, onLogout }) {
                     <Field label="System prompt" hint="Sets the assistant's behavior"><textarea name="systemPrompt" rows="4" value={editDraft.systemPrompt} onChange={updateEditDraft} required /></Field>
                     <Field label="Website URL" hint="Where this widget will be embedded"><input name="websiteUrl" type="url" placeholder="https://example.com" value={editDraft.websiteUrl} onChange={updateEditDraft} /></Field>
                     <Field label="What would you like the opening message to be?" hint="Shown as the first bubble when chat opens; blank = none"><textarea name="openingMessage" rows="2" value={editDraft.openingMessage} onChange={updateEditDraft} /></Field>
+                    <CapabilityPicker label="Capabilities" hint="What this widget was built for - reference only" value={editDraft.capabilities} onToggle={toggleEditCapability} />
                     <div className="grid gap-5 sm:grid-cols-2"><ColorField label="Primary color" name="primaryColor" value={editDraft.primaryColor} onChange={updateEditDraft} /><ColorField label="Text color" name="textColor" value={editDraft.textColor} onChange={updateEditDraft} /></div>
                     <div className="flex items-center gap-2">
                       <button type="button" className="primary-button" onClick={() => saveEdit(widget.id)}><Check size={15} /> Save changes</button>
@@ -210,29 +237,36 @@ function App({ token, initialWidgets, onLogout }) {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold">{widget.name}</p>
-                      <p className="truncate text-xs text-[#7d817f]">{widget.websiteUrl || 'No website URL set'}</p>
-                      <p className="truncate text-xs text-[#7d817f]">{widget.messagesUsed} messages used{widget.messageLimit != null ? ` / ${widget.messageLimit}` : ' (unlimited)'}</p>
-                      <p className="truncate text-xs text-[#7d817f]">~${widget.costUsd.toFixed(4)} cost &middot; ~{widget.hoursSaved}h saved</p>
+                  <div>
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{widget.name}</p>
+                        <p className="truncate text-xs text-[#7d817f]">{widget.websiteUrl || 'No website URL set'}</p>
+                        <p className="truncate text-xs text-[#7d817f]">{widget.messagesUsed} messages used{widget.messageLimit != null ? ` / ${widget.messageLimit}` : ' (unlimited)'}</p>
+                        <p className="truncate text-xs text-[#7d817f]">~${widget.costUsd.toFixed(4)} cost &middot; ~{widget.hoursSaved}h saved</p>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        <input
+                          className="limit-input"
+                          type="number"
+                          min="0"
+                          placeholder="Limit"
+                          defaultValue={widget.messageLimit ?? ''}
+                          onChange={(event) => setLimitDrafts((current) => ({ ...current, [widget.id]: event.target.value }))}
+                        />
+                        <button type="button" className="copy-button" onClick={() => saveLimit(widget.id)}>Save limit</button>
+                        <button type="button" className="copy-button" onClick={() => startEdit(widget)}><Pencil size={14} /> Edit</button>
+                        <button type="button" className="copy-button" onClick={() => setTestChatId(testChatId === widget.id ? null : widget.id)}><MessageCircle size={14} /> Test chat</button>
+                        <button type="button" className="copy-button" onClick={() => resetWidgetUsage(widget.id)}><RotateCcw size={14} /> Reset usage</button>
+                        <button type="button" className="copy-button" onClick={() => copyText(widget.embedCode)}><Clipboard size={14} /> Copy</button>
+                        <button type="button" className="copy-button" onClick={() => removeWidget(widget.id)}><Trash2 size={14} /></button>
+                      </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <input
-                        className="limit-input"
-                        type="number"
-                        min="0"
-                        placeholder="Limit"
-                        defaultValue={widget.messageLimit ?? ''}
-                        onChange={(event) => setLimitDrafts((current) => ({ ...current, [widget.id]: event.target.value }))}
-                      />
-                      <button type="button" className="copy-button" onClick={() => saveLimit(widget.id)}>Save limit</button>
-                      <button type="button" className="copy-button" onClick={() => startEdit(widget)}><Pencil size={14} /> Edit</button>
-                      <button type="button" className="copy-button" onClick={() => setTestChatId(testChatId === widget.id ? null : widget.id)}><MessageCircle size={14} /> Test chat</button>
-                      <button type="button" className="copy-button" onClick={() => resetWidgetUsage(widget.id)}><RotateCcw size={14} /> Reset usage</button>
-                      <button type="button" className="copy-button" onClick={() => copyText(widget.embedCode)}><Clipboard size={14} /> Copy</button>
-                      <button type="button" className="copy-button" onClick={() => removeWidget(widget.id)}><Trash2 size={14} /></button>
-                    </div>
+                    {widget.capabilities && widget.capabilities.length > 0 && (
+                      <p className="mt-2 flex flex-wrap gap-1">
+                        {widget.capabilities.map((capability) => <span key={capability} className="capability-tag">{capability}</span>)}
+                      </p>
+                    )}
                   </div>
                 )}
                 {testChatId === widget.id && editingId !== widget.id && (
@@ -295,6 +329,20 @@ function TestChatPanel({ token, widget, onLogout, onSent }) {
       <button type="submit" className="copy-button" disabled={busy}><Send size={14} /></button>
     </form>
     {error && <p className="mt-2 text-sm font-semibold text-[#b3261e]">{error}</p>}
+  </div>;
+}
+
+function CapabilityPicker({ label, hint, value, onToggle }) {
+  return <div className="field">
+    <span className="flex justify-between"><strong>{label}</strong><small>{hint}</small></span>
+    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      {CAPABILITIES.map((capability) => (
+        <label key={capability} className="flex cursor-pointer items-center gap-2 text-sm">
+          <input type="checkbox" checked={value.includes(capability)} onChange={() => onToggle(capability)} />
+          {capability}
+        </label>
+      ))}
+    </div>
   </div>;
 }
 

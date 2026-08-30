@@ -42,7 +42,8 @@ The dashboard at your Production domain is a password gate first (enter `ADMIN_P
 - messages used vs. its message limit (blank/unlimited if not set)
 - an inline field to change that limit at any time
 - estimated **cost** (`~$X.XXXX`, from actual token usage × the per-model rate table in `server/src/pricing.js`, including Anthropic's cache write/read rates — see "Cost per message" below) and estimated **hours saved** (`messagesUsed × MINUTES_SAVED_PER_MESSAGE ÷ 60`, default 4 minutes/message, override via the `MINUTES_SAVED_PER_MESSAGE` env var) — both are estimates for budgeting/marketing, not billing-accurate figures
-- **Edit** — change name, system prompt, opening message, website URL, or colors in place
+- **Edit** — change name, system prompt, opening message, website URL, colors, or capabilities in place
+- **Capabilities** — tag a widget with which of the seven standard capabilities it was built for (Lead generation, Rapid customer support, Appointment booking, Ongoing support and optimization, Sophisticated AI behavior, AI-to-AI workflows, Advanced chatbot management). Shown as small tags on each widget row. This is bookkeeping only — it doesn't change the widget's behavior or cost, it just tracks what a widget was sold to do; the list is defined once, in `CAPABILITIES` in `server/src/app.js` (kept in sync with the same-named list in `dashboard/src/main.jsx`)
 - **Test chat** — a small chat box that talks to that widget's actual prompt/model via `/api/admin/widgets/:id/test-chat`, so you can verify a prompt change without opening the customer's live site. Test messages use real API spend (counted in the widget's cost) but never count toward its message limit or usage alerts.
 - a copy-embed button (re-copy a customer's script tag without recreating their widget)
 - delete (immediately and permanently breaks that widget's embed — customer sites calling it will get a 404; nothing recreates it afterward)
@@ -119,7 +120,7 @@ Still worth adding before scaling past a handful of customers:
 
 Admin routes require `Authorization: Bearer <ADMIN_PASSWORD>`:
 
-- `POST /api/admin/widgets` creates a widget from `name`, `systemPrompt`, `primaryColor`, `textColor`, optional `websiteUrl`, optional `openingMessage` (shown as the widget's first bubble; blank = none), optional `messageLimit` (omit/blank for unlimited).
+- `POST /api/admin/widgets` creates a widget from `name`, `systemPrompt`, `primaryColor`, `textColor`, optional `websiteUrl`, optional `openingMessage` (shown as the widget's first bubble; blank = none), optional `messageLimit` (omit/blank for unlimited), optional `capabilities` (array of strings from `CAPABILITIES` in `server/src/app.js`; anything else is silently dropped).
 - `GET /api/admin/widgets` lists every widget with usage (`messagesUsed`, `messageLimit`), estimated `costUsd` and `hoursSaved`, and `embedCode` — powers the dashboard's admin panel.
 - `PATCH /api/admin/widgets/:id` updates any of the same fields (commonly `messageLimit`).
 - `DELETE /api/admin/widgets/:id` removes a widget; its embed starts 404ing immediately.

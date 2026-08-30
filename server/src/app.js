@@ -29,6 +29,24 @@ const minutesSavedPerMessage = Number(process.env.MINUTES_SAVED_PER_MESSAGE) || 
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
 
+// The standard set of capabilities a widget can be tagged with - matches the
+// packages/add-ons vocabulary customers see on the marketing site. This is
+// bookkeeping only (shown in the admin panel so the operator can see what a
+// widget was built for); it has no effect on the chat route itself.
+const CAPABILITIES = [
+  'Lead generation',
+  'Rapid customer support',
+  'Appointment booking',
+  'Ongoing support and optimization',
+  'Sophisticated AI behavior',
+  'AI-to-AI workflows',
+  'Advanced chatbot management'
+];
+const cleanCapabilities = (value) => {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item) => CAPABILITIES.includes(item)))];
+};
+
 const validHex = (value) => /^#[0-9a-f]{6}$/i.test(value || '');
 const cleanText = (value, fallback, max) => String(value || fallback).trim().slice(0, max);
 const validProvider = (value) => ['openai', 'anthropic'].includes(String(value || '').toLowerCase());
@@ -253,7 +271,8 @@ app.post('/api/admin/widgets', requireAdmin, requireDatabase, async (request, re
     textColor: body.textColor,
     websiteUrl: cleanWebsiteUrl(body.websiteUrl),
     openingMessage: cleanText(body.openingMessage, '', 500),
-    messageLimit: cleanMessageLimit(body.messageLimit)
+    messageLimit: cleanMessageLimit(body.messageLimit),
+    capabilities: cleanCapabilities(body.capabilities)
   });
   return response.status(201).json(withStats(widget));
 });
@@ -273,6 +292,7 @@ app.patch('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (reques
   if (body.messageLimit !== undefined) patch.messageLimit = cleanMessageLimit(body.messageLimit);
   if (body.primaryColor !== undefined && validHex(body.primaryColor)) patch.primaryColor = body.primaryColor;
   if (body.textColor !== undefined && validHex(body.textColor)) patch.textColor = body.textColor;
+  if (body.capabilities !== undefined) patch.capabilities = cleanCapabilities(body.capabilities);
   const widget = await updateWidget(request.params.id, patch);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
   return response.json(withStats(widget));
@@ -295,7 +315,7 @@ app.get('/api/widgets/:id', requireDatabase, async (request, response) => {
   const widget = await getWidget(request.params.id);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
   if (!originAllowed(request, widget)) return response.status(403).json({ error: 'This widget is not authorized for this site.' });
-  const { systemPrompt: _systemPrompt, provider: _provider, messageLimit: _messageLimit, messagesUsed: _messagesUsed, costUsd: _costUsd, lastAlertThreshold: _lastAlertThreshold, ...publicConfig } = widget;
+  const { systemPrompt: _systemPrompt, provider: _provider, messageLimit: _messageLimit, messagesUsed: _messagesUsed, costUsd: _costUsd, lastAlertThreshold: _lastAlertThreshold, capabilities: _capabilities, ...publicConfig } = widget;
   return response.json(publicConfig);
 });
 
