@@ -75,7 +75,7 @@ function App() {
 
 function Field({ label, hint, children }) { return <label className="field"><span className="flex justify-between"><strong>{label}</strong><small>{hint}</small></span>{children}</label>; }
 function ColorField({ label, name, value, onChange }) {
-  return <Field label={label} hint="Hex code"><div className="color-input"><input type="color" value={isValidHexColor(value) ? value : '#000000'} onChange={onChange} name={name} /><input name={name} value={value} onChange={onChange} title="Use a six-digit hex color like #D95D39" /></div></Field>;
+  return <Field label={label} hint="Hex code"><div className="color-input"><span className="color-chip" style={{ backgroundColor: isValidHexColor(value) ? value : '#000000' }} aria-hidden="true" /><input name={name} value={value} onChange={onChange} title="Use a six-digit hex color like #D95D39" placeholder="#D95D39" /></div></Field>;
 }
 
 createRoot(document.getElementById('root')).render(<App />);
