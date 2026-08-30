@@ -13,6 +13,17 @@ const widgets = new Map();
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/widget.js');
 const defaultLlmProvider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
 
+const demoWidgetId = process.env.DEMO_WIDGET_ID || '1fcbebb0-effe-495e-b3af-6f1a33c6bb16';
+widgets.set(demoWidgetId, {
+  id: demoWidgetId,
+  provider: defaultLlmProvider,
+  name: 'Nova',
+  systemPrompt: 'You are a thoughtful, concise customer support assistant. Be warm, useful, and honest when you do not know something.',
+  primaryColor: '#D95D39',
+  textColor: '#FFFFFF',
+  createdAt: new Date().toISOString()
+});
+
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
 
