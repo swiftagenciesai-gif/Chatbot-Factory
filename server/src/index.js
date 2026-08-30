@@ -71,7 +71,10 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       console.error('Anthropic request failed', response.status, detail);
-      throw new Error(`Anthropic request failed (status ${response.status}).`);
+      const failure = new Error(`Anthropic request failed (status ${response.status}).`);
+      failure.status = response.status;
+      failure.detail = detail;
+      throw failure;
     }
     const result = await response.json();
     return result.content?.[0]?.text || 'I could not produce a response.';
@@ -92,13 +95,26 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     console.error('OpenAI request failed', response.status, detail);
-    throw new Error(`OpenAI request failed (status ${response.status}).`);
+    const failure = new Error(`OpenAI request failed (status ${response.status}).`);
+    failure.status = response.status;
+    failure.detail = detail;
+    throw failure;
   }
   const result = await response.json();
   return result.choices?.[0]?.message?.content || 'I could not produce a response.';
 };
 
 app.get('/health', (_request, response) => response.json({ ok: true }));
+
+app.get('/api/debug-llm', async (request, response) => {
+  const provider = validProvider(request.query.provider) ? request.query.provider.toLowerCase() : demoProvider;
+  try {
+    const message = await requestChatCompletion(provider, 'Reply with the single word: OK.', [{ role: 'user', content: 'ping' }]);
+    return response.json({ ok: true, provider, message });
+  } catch (error) {
+    return response.status(502).json({ ok: false, provider, status: error.status || null, detail: error.detail || error.message });
+  }
+});
 
 app.post('/api/widgets', (request, response) => {
   const body = request.body || {};
