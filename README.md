@@ -45,7 +45,7 @@ For Claude via Anthropic:
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your_key
 ANTHROPIC_BASE_URL=https://api.anthropic.com
-ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+ANTHROPIC_MODEL=claude-sonnet-5
 ```
 
 ## Production shape
