@@ -92,7 +92,7 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
     if (!apiKey) throw new Error('Anthropic API key is not configured on the server.');
     const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
     const body = {
-      model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest',
+      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
       system: systemPrompt,
       max_tokens: 1024,
       messages: messages.map(({ role, content }) => ({ role, content: String(content || '') }))
