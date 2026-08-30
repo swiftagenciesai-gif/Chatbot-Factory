@@ -139,6 +139,23 @@ const recordProviderOutcome = (provider, ok, error) => {
 // and restore the dashboard's provider selector.
 const FORCED_MODEL = 'claude-haiku-4-5-20251001';
 
+// Marks the last message before the newest user turn as a cache breakpoint,
+// so a growing conversation only pays full input price for the newest
+// message - everything before it (system prompt + prior turns) is served
+// from Anthropic's prompt cache at ~10% of the normal input rate once
+// written. No-ops (silently, no cost penalty) on the first turn or on a
+// prefix too short to meet the model's minimum cacheable length.
+const withCacheBreakpoint = (messages) => {
+  const breakpointIndex = messages.length - 2;
+  return messages.map(({ role, content }, index) => {
+    const text = String(content || '');
+    if (index === breakpointIndex && breakpointIndex >= 0) {
+      return { role, content: [{ type: 'text', text, cache_control: { type: 'ephemeral' } }] };
+    }
+    return { role, content: text };
+  });
+};
+
 const requestChatCompletion = async (provider, systemPrompt, messages) => {
   if (provider === 'anthropic') {
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -147,9 +164,16 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
     const model = FORCED_MODEL;
     const body = {
       model,
-      system: systemPrompt,
-      max_tokens: 1024,
-      messages: messages.map(({ role, content }) => ({ role, content: String(content || '') }))
+      // The system prompt (safety prefix + widget's own prompt) is identical
+      // across every message, for every visitor, on a given widget - caching
+      // it means only the very first request after a cache miss pays full
+      // price; every request after that reads it at ~10% cost.
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+      // A chat-widget reply rarely needs more than a few hundred tokens, and
+      // output tokens cost 5x input tokens - 1024 was leaving cost on the
+      // table for no quality benefit.
+      max_tokens: 600,
+      messages: withCacheBreakpoint(messages)
     };
     const response = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
@@ -169,7 +193,9 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
       message: result.content?.[0]?.text || 'I could not produce a response.',
       model,
       inputTokens: result.usage?.input_tokens || 0,
-      outputTokens: result.usage?.output_tokens || 0
+      outputTokens: result.usage?.output_tokens || 0,
+      cacheCreationTokens: result.usage?.cache_creation_input_tokens || 0,
+      cacheReadTokens: result.usage?.cache_read_input_tokens || 0
     };
   }
 
@@ -293,7 +319,7 @@ app.post('/api/chat', requireDatabase, async (request, response) => {
   try {
     const completion = await requestChatCompletion(provider, withSafetyPrefix(widget.systemPrompt), safeMessages);
     recordProviderOutcome(provider, true);
-    const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
+    const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens, completion.cacheCreationTokens, completion.cacheReadTokens);
     const updated = await incrementUsage(widget.id, costUsd);
     if (updated && updated.messageLimit) {
       const percentage = (updated.messagesUsed / updated.messageLimit) * 100;
@@ -324,7 +350,7 @@ app.post('/api/admin/widgets/:id/test-chat', requireAdmin, requireDatabase, asyn
   try {
     const completion = await requestChatCompletion(provider, withSafetyPrefix(widget.systemPrompt), safeMessages);
     recordProviderOutcome(provider, true);
-    const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
+    const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens, completion.cacheCreationTokens, completion.cacheReadTokens);
     await incrementCostOnly(widget.id, costUsd);
     return response.json({ message: moderateOutput(completion.message) });
   } catch (error) {

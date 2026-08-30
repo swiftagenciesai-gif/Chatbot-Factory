@@ -41,7 +41,7 @@ The dashboard at your Production domain is a password gate first (enter `ADMIN_P
 
 - messages used vs. its message limit (blank/unlimited if not set)
 - an inline field to change that limit at any time
-- estimated **cost** (`~$X.XXXX`, from actual token usage × the per-model rate table in `server/src/pricing.js`) and estimated **hours saved** (`messagesUsed × MINUTES_SAVED_PER_MESSAGE ÷ 60`, default 4 minutes/message, override via the `MINUTES_SAVED_PER_MESSAGE` env var) — both are estimates for budgeting/marketing, not billing-accurate figures
+- estimated **cost** (`~$X.XXXX`, from actual token usage × the per-model rate table in `server/src/pricing.js`, including Anthropic's cache write/read rates — see "Cost per message" below) and estimated **hours saved** (`messagesUsed × MINUTES_SAVED_PER_MESSAGE ÷ 60`, default 4 minutes/message, override via the `MINUTES_SAVED_PER_MESSAGE` env var) — both are estimates for budgeting/marketing, not billing-accurate figures
 - **Edit** — change name, system prompt, opening message, website URL, or colors in place
 - **Test chat** — a small chat box that talks to that widget's actual prompt/model via `/api/admin/widgets/:id/test-chat`, so you can verify a prompt change without opening the customer's live site. Test messages use real API spend (counted in the widget's cost) but never count toward its message limit or usage alerts.
 - a copy-embed button (re-copy a customer's script tag without recreating their widget)
@@ -60,6 +60,15 @@ The same webhook also carries **failure alerts**: if `/api/chat` (or the admin t
 If a widget has a `websiteUrl` set, `/api/chat` (and the config fetch in `/api/widgets/:id`) check the browser's `Origin` header against it and reject a mismatch with `403` — this stops someone from copy-pasting another company's embed script onto their own site and running up that widget's message limit and your API cost. It's best-effort, not a hard security boundary: a request with no `Origin` header (non-browser tools) is let through, since there's nothing to check.
 
 `/api/chat` also rate-limits to `CHAT_RATE_LIMIT_PER_MINUTE` (default 20) requests per minute per widget+IP, returning `429` past that. This is an in-memory limiter, so on Vercel's autoscaling it's per-instance, not perfectly global — good enough to stop one script or browser tab from hammering a widget, not a substitute for a shared store like Redis if you need an exact global limit later.
+
+### Cost per message
+
+Every `/api/chat` request re-sends the full system prompt and conversation history so far (the API is stateless), so cost per message naturally grows as a conversation gets longer — this isn't a bug, it's how the underlying model works. Two things keep it as low as it can be without hurting reply quality:
+
+- **Prompt caching.** The system prompt (identical for every message on a given widget) and everything through the previous turn are marked as Anthropic cache breakpoints (`server/src/app.js`, `requestChatCompletion`/`withCacheBreakpoint`). The first request after a cache miss pays full input price and a 1.25x write premium; every request after that reads the cached prefix at ~10% of the normal input rate instead of paying full price again. In practice this means only the newest message in a conversation is billed as fresh input — the system prompt and prior turns are nearly free. `estimateCostUsd` in `server/src/pricing.js` accounts for both the write premium and the read discount, so the dashboard's cost figure reflects the actual savings.
+- **A tighter output cap.** `max_tokens` is 600, not 1024 — output tokens cost 5x input tokens on Haiku 4.5, and a chat-widget reply rarely needs more. `moderation.js`'s safety prefix also nudges every reply to stay concise (2-4 sentences unless the visitor asks for more), which is both better UX for a widget and directly cuts the most expensive token type.
+
+Cache breakpoints have a per-model minimum prefix length; a very short system prompt or the first message of a conversation may fall under it and simply not cache yet (no cost penalty either way — it just behaves like caching wasn't there).
 
 ### Output moderation
 
