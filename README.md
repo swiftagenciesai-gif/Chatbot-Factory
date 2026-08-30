@@ -24,8 +24,12 @@ Customer site <- generated <script data-widget-id="..." src=".../widget.js">
 1. `DATABASE_URL` — a Postgres connection string. Easiest path: Vercel project -> **Storage** tab -> create a Postgres database (Neon-backed) -> it injects a compatible env var (`DATABASE_URL` or `POSTGRES_URL`, both are read) automatically.
 2. `ADMIN_PASSWORD` — a password of your choosing. Required to use the dashboard's admin panel (create/list/edit/delete widgets) at all; without it, every `/api/admin/*` route returns 500.
 3. `PUBLIC_BASE_URL` — the project's stable Production domain (Project -> Domains -> the entry with no random hash, e.g. `https://your-project.vercel.app`, or a custom domain). Without it, generated embed snippets fall back to `http://localhost:3001`, which does not work from a real website.
-4. `OPENAI_API_KEY` or (`LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`) so `/api/chat` can actually reach a model. This key is shared by every widget created through the dashboard — use each widget's message limit (below) to bound what a single customer can cost you.
+4. `ANTHROPIC_API_KEY` so `/api/chat` can actually reach a model. Every widget is hardcoded to `claude-haiku-4-5-20251001` (see "Model" below), so this is the only LLM key currently needed; `OPENAI_API_KEY` and `ANTHROPIC_MODEL` are unused while that's the case. This key is shared by every widget created through the dashboard — use each widget's message limit (below) to bound what a single customer can cost you.
 5. `ALERT_WEBHOOK_URL` (optional) — a Slack or Discord incoming webhook URL. When set, you get pinged the moment any widget crosses 75%, 90%, or 95% of its message limit. Leave unset for no notifications.
+
+### Model
+
+Every widget currently runs on `claude-haiku-4-5-20251001`, hardcoded as `FORCED_MODEL` in `server/src/app.js` — this ignores each widget's stored `provider` field and any `ANTHROPIC_MODEL`/`OPENAI_*` env vars, on purpose: env-var-driven model selection was a repeated source of "why isn't this taking effect" bugs, so the model is now pinned directly in code instead. The dashboard's widget form no longer shows an AI-provider selector, since it wouldn't do anything. To restore per-widget model choice, remove the forced `provider`/`FORCED_MODEL` overrides in `server/src/app.js` and bring back the provider `<select>` in `dashboard/src/main.jsx`.
 
 ### Persistence
 
@@ -48,6 +52,8 @@ The password is kept in `sessionStorage` only (cleared when the tab closes); the
 ### Usage alerts
 
 Set `ALERT_WEBHOOK_URL` to a Slack or Discord incoming webhook URL (both accept the same JSON shape this sends: `{"text": "...", "content": "..."}`, so either works with no extra config) to get notified when a widget's usage crosses 75%, 90%, or 95% of its message limit. Each threshold fires once per widget — raising or lowering the message limit (via Edit or the inline limit field) resets which thresholds have already fired, since the percentage basis changed. Widgets with no message limit set never trigger an alert, since there's no ceiling to measure against. A missing/unreachable webhook URL fails silently — it never blocks or slows down a chat reply.
+
+The same webhook also carries **failure alerts**: if `/api/chat` (or the admin test-chat) fails `CHAT_FAILURE_ALERT_THRESHOLD` times in a row (default 3) for one provider — an expired key, a deprecated model, the provider being down — you get pinged with the actual error message, instead of finding out from a customer or your own manual testing. It fires once per streak and re-arms after the next successful reply, so it won't spam you with one alert per failed message. Like the rate limiter, the failure streak is tracked in memory per server instance, not globally.
 
 ### Origin lock and rate limiting on `/api/chat`
 
@@ -76,28 +82,23 @@ Set credentials in `server/.env`. The LLM key never appears in a generated snipp
 ```bash
 DATABASE_URL=postgres://...
 ADMIN_PASSWORD=choose-a-password
+ANTHROPIC_API_KEY=your_key
 ```
 
-For OpenAI:
+The OpenAI env vars below, and `ANTHROPIC_MODEL`, are read by the code but currently unused while every widget is hardcoded to `claude-haiku-4-5-20251001` (see "Model" above) - only relevant again if that forced model is removed.
 
 ```bash
 OPENAI_API_KEY=your_key
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
-```
-
-For Claude via Anthropic:
-
-```bash
 LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=your_key
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 ANTHROPIC_MODEL=claude-sonnet-5
 ```
 
 ## Production shape
 
-Done: Postgres persistence, a password-gated admin panel, per-widget message limits, per-widget cost/hours-saved tracking, usage-threshold alerts, a best-effort origin lock, per-widget+IP rate limiting on `/api/chat`, an admin test-chat, and baseline output moderation.
+Done: Postgres persistence, a password-gated admin panel, per-widget message limits, per-widget cost/hours-saved tracking, usage-threshold and provider-failure alerts, a best-effort origin lock, per-widget+IP rate limiting on `/api/chat`, an admin test-chat, baseline output moderation, and a hardcoded model (`claude-haiku-4-5-20251001`) for every widget.
 
 Still worth adding before scaling past a handful of customers:
 
