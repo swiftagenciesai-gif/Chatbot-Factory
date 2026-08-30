@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage, incrementCostOnly, resetUsage, updateAlertThreshold } from './db.js';
 import { estimateCostUsd } from './pricing.js';
-import { sendUsageAlert } from './notify.js';
+import { sendUsageAlert, sendFailureAlert } from './notify.js';
 import { SAFETY_PREFIX, moderateOutput } from './moderation.js';
 
 const app = express();
@@ -111,12 +111,40 @@ const isChatRateLimited = (key) => {
 
 const ALERT_THRESHOLDS = [95, 90, 75];
 
+// Tracks consecutive /api/chat failures per provider, in-memory (same
+// per-instance caveat as the rate limiter above). Once a streak crosses
+// CHAT_FAILURE_ALERT_THRESHOLD, fires one alert - not one per failure - and
+// waits for a success to reset before it can fire again. This is what
+// catches an expired key, a deprecated model, or a provider outage without
+// waiting for a customer complaint or the operator's own manual testing.
+const failureAlertThreshold = Number(process.env.CHAT_FAILURE_ALERT_THRESHOLD) || 3;
+const providerFailureStreaks = new Map();
+const recordProviderOutcome = (provider, ok, error) => {
+  if (ok) {
+    providerFailureStreaks.delete(provider);
+    return;
+  }
+  const streak = (providerFailureStreaks.get(provider) || 0) + 1;
+  providerFailureStreaks.set(provider, streak);
+  if (streak === failureAlertThreshold) {
+    sendFailureAlert({ provider, consecutiveFailures: streak, lastError: error }).catch(() => {});
+  }
+};
+
+// Every widget currently runs on this model, regardless of its stored
+// "provider" field or any ANTHROPIC_MODEL env var - a deliberate, hardcoded
+// cost decision (not left to env var configuration, which has repeatedly
+// been a source of "why isn't this taking effect" bugs). To go back to
+// per-widget/per-env model choice, remove the forced provider/model below
+// and restore the dashboard's provider selector.
+const FORCED_MODEL = 'claude-haiku-4-5-20251001';
+
 const requestChatCompletion = async (provider, systemPrompt, messages) => {
   if (provider === 'anthropic') {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('Anthropic API key is not configured on the server.');
     const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
-    const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
+    const model = FORCED_MODEL;
     const body = {
       model,
       system: systemPrompt,
@@ -261,8 +289,10 @@ app.post('/api/chat', requireDatabase, async (request, response) => {
   }
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
+  const provider = 'anthropic'; // forced - see FORCED_MODEL above
   try {
-    const completion = await requestChatCompletion(widget.provider || defaultLlmProvider, withSafetyPrefix(widget.systemPrompt), safeMessages);
+    const completion = await requestChatCompletion(provider, withSafetyPrefix(widget.systemPrompt), safeMessages);
+    recordProviderOutcome(provider, true);
     const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
     const updated = await incrementUsage(widget.id, costUsd);
     if (updated && updated.messageLimit) {
@@ -276,6 +306,7 @@ app.post('/api/chat', requireDatabase, async (request, response) => {
     return response.json({ message: moderateOutput(completion.message) });
   } catch (error) {
     const message = error.message || 'Unable to reach the LLM provider.';
+    recordProviderOutcome(provider, false, message);
     return response.status(502).json({ error: message });
   }
 });
@@ -289,13 +320,16 @@ app.post('/api/admin/widgets/:id/test-chat', requireAdmin, requireDatabase, asyn
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
+  const provider = 'anthropic'; // forced - see FORCED_MODEL above
   try {
-    const completion = await requestChatCompletion(widget.provider || defaultLlmProvider, withSafetyPrefix(widget.systemPrompt), safeMessages);
+    const completion = await requestChatCompletion(provider, withSafetyPrefix(widget.systemPrompt), safeMessages);
+    recordProviderOutcome(provider, true);
     const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
     await incrementCostOnly(widget.id, costUsd);
     return response.json({ message: moderateOutput(completion.message) });
   } catch (error) {
     const message = error.message || 'Unable to reach the LLM provider.';
+    recordProviderOutcome(provider, false, message);
     return response.status(502).json({ error: message });
   }
 });

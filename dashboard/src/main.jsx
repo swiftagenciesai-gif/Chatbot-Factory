@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 
 const initial = {
-  provider: 'anthropic',
   name: 'Nova',
   systemPrompt: 'You are a thoughtful, concise customer support assistant. Be warm, useful, and honest when you do not know something.',
   primaryColor: '#D95D39',
@@ -178,7 +177,7 @@ function App({ token, initialWidgets, onLogout }) {
         <h1 className="display mt-4 max-w-xl">Your AI, in every conversation.</h1>
         <p className="mt-5 max-w-lg text-lg leading-8 text-[#69716f]">Shape the personality and palette. We will hand you one clean script tag for any website.</p>
         <form onSubmit={createWidget} noValidate className="mt-10 space-y-7">
-          <Field label="AI provider" hint="Model backend"><select name="provider" value={form.provider} onChange={update}><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option></select></Field>
+          <p className="text-xs text-[#7d817f]">All widgets currently run on Claude Haiku 4.5.</p>
           <Field label="Widget name" hint="Shown in the chat header"><input name="name" value={form.name} onChange={update} required /></Field>
           <Field label="System prompt" hint="Sets the assistant's behavior"><textarea name="systemPrompt" rows="4" value={form.systemPrompt} onChange={update} required /></Field>
           <Field label="Website URL" hint="Where this widget will be embedded"><input name="websiteUrl" type="url" placeholder="https://example.com" value={form.websiteUrl} onChange={update} /></Field>
