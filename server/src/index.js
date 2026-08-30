@@ -13,11 +13,13 @@ const resolveBaseUrl = (request) => process.env.PUBLIC_BASE_URL || `${request.pr
 const widgets = new Map();
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/widget.js');
 const defaultLlmProvider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+const availableProviders = [process.env.ANTHROPIC_API_KEY && 'anthropic', process.env.OPENAI_API_KEY && 'openai'].filter(Boolean);
+const demoProvider = availableProviders.includes(defaultLlmProvider) ? defaultLlmProvider : (availableProviders[0] || defaultLlmProvider);
 
 const demoWidgetId = process.env.DEMO_WIDGET_ID || '1fcbebb0-effe-495e-b3af-6f1a33c6bb16';
 widgets.set(demoWidgetId, {
   id: demoWidgetId,
-  provider: defaultLlmProvider,
+  provider: demoProvider,
   name: 'Nova',
   systemPrompt: 'You are a thoughtful, concise customer support assistant. Be warm, useful, and honest when you do not know something.',
   primaryColor: '#D95D39',
