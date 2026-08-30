@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check, Clipboard, Code2, LogOut, MessageCircle, Pencil, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
+import { Check, Clipboard, Code2, LogOut, MessageCircle, Pencil, RotateCcw, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -65,6 +65,7 @@ function App({ token, initialWidgets, onLogout }) {
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [editStatus, setEditStatus] = useState('');
+  const [testChatId, setTestChatId] = useState(null);
 
   const loadWidgets = async () => {
     try {
@@ -120,6 +121,7 @@ function App({ token, initialWidgets, onLogout }) {
 
   const startEdit = (widget) => {
     setEditingId(widget.id);
+    setTestChatId(null);
     setEditStatus('');
     setEditDraft({
       name: widget.name,
@@ -227,11 +229,15 @@ function App({ token, initialWidgets, onLogout }) {
                       />
                       <button type="button" className="copy-button" onClick={() => saveLimit(widget.id)}>Save limit</button>
                       <button type="button" className="copy-button" onClick={() => startEdit(widget)}><Pencil size={14} /> Edit</button>
+                      <button type="button" className="copy-button" onClick={() => setTestChatId(testChatId === widget.id ? null : widget.id)}><MessageCircle size={14} /> Test chat</button>
                       <button type="button" className="copy-button" onClick={() => resetWidgetUsage(widget.id)}><RotateCcw size={14} /> Reset usage</button>
                       <button type="button" className="copy-button" onClick={() => copyText(widget.embedCode)}><Clipboard size={14} /> Copy</button>
                       <button type="button" className="copy-button" onClick={() => removeWidget(widget.id)}><Trash2 size={14} /></button>
                     </div>
                   </div>
+                )}
+                {testChatId === widget.id && editingId !== widget.id && (
+                  <TestChatPanel token={token} widget={widget} onLogout={onLogout} onSent={loadWidgets} />
                 )}
               </li>
             ))}
@@ -241,6 +247,56 @@ function App({ token, initialWidgets, onLogout }) {
       <section className="preview-wrap lg:pt-20"><div className="preview-label"><span className="live-dot" /> Live preview</div><div className="preview-canvas"><div className="site-lines"><span /><span /><span /></div><div className="fake-site-title">A quieter way to get help.</div><div className="fake-site-copy">Good support should feel close, clear, and human.</div><div className="preview-widget"><div className="preview-header" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><span>{form.name || 'Assistant'}</span><span>×</span></div><div className="preview-messages"><div className="preview-bubble assistant-bubble">{form.openingMessage || `Hi, I'm ${form.name || 'your assistant'}. How can I help?`}</div><div className="preview-bubble user-bubble" style={{ backgroundColor: form.primaryColor, color: form.textColor }}>Tell me more</div></div><div className="preview-input">Ask a question... <span>↑</span></div></div><div className="preview-fab" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><MessageCircle size={23} /></div></div></section>
     </div>
   </main>;
+}
+
+function TestChatPanel({ token, widget, onLogout, onSent }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const send = async (event) => {
+    event.preventDefault();
+    const content = input.trim();
+    if (!content || busy) return;
+    const nextMessages = [...messages, { role: 'user', content }];
+    setMessages(nextMessages);
+    setInput('');
+    setBusy(true);
+    setError('');
+    try {
+      const response = await adminFetch(token, `/api/admin/widgets/${widget.id}/test-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: nextMessages })
+      });
+      if (response.status === 401) return onLogout();
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      setMessages([...nextMessages, { role: 'assistant', content: data.message }]);
+      onSent();
+    } catch (err) {
+      setError(err.message || 'Could not reach the model.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <div className="test-chat">
+    <p className="mb-2 text-xs text-[#7d817f]">Test messages here use your real API key and count toward this widget's cost, but not toward its message limit or usage alerts.</p>
+    <div className="test-chat-messages">
+      {messages.length === 0 && <p className="text-xs text-[#7d817f]">Send a message to see how {widget.name} responds with its current prompt.</p>}
+      {messages.map((message, index) => (
+        <div key={index} className={`test-chat-bubble ${message.role}`}>{message.content}</div>
+      ))}
+      {busy && <div className="test-chat-bubble assistant">...</div>}
+    </div>
+    <form onSubmit={send} className="flex gap-2">
+      <input className="flex-1" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Type a test message..." />
+      <button type="submit" className="copy-button" disabled={busy}><Send size={14} /></button>
+    </form>
+    {error && <p className="mt-2 text-sm font-semibold text-[#b3261e]">{error}</p>}
+  </div>;
 }
 
 function Field({ label, hint, children }) { return <label className="field"><span className="flex justify-between"><strong>{label}</strong><small>{hint}</small></span>{children}</label>; }

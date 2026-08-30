@@ -39,6 +39,7 @@ The dashboard at your Production domain is a password gate first (enter `ADMIN_P
 - an inline field to change that limit at any time
 - estimated **cost** (`~$X.XXXX`, from actual token usage × the per-model rate table in `server/src/pricing.js`) and estimated **hours saved** (`messagesUsed × MINUTES_SAVED_PER_MESSAGE ÷ 60`, default 4 minutes/message, override via the `MINUTES_SAVED_PER_MESSAGE` env var) — both are estimates for budgeting/marketing, not billing-accurate figures
 - **Edit** — change name, system prompt, opening message, website URL, or colors in place
+- **Test chat** — a small chat box that talks to that widget's actual prompt/model via `/api/admin/widgets/:id/test-chat`, so you can verify a prompt change without opening the customer's live site. Test messages use real API spend (counted in the widget's cost) but never count toward its message limit or usage alerts.
 - a copy-embed button (re-copy a customer's script tag without recreating their widget)
 - delete (immediately and permanently breaks that widget's embed — customer sites calling it will get a 404; nothing recreates it afterward)
 
@@ -53,6 +54,10 @@ Set `ALERT_WEBHOOK_URL` to a Slack or Discord incoming webhook URL (both accept 
 If a widget has a `websiteUrl` set, `/api/chat` (and the config fetch in `/api/widgets/:id`) check the browser's `Origin` header against it and reject a mismatch with `403` — this stops someone from copy-pasting another company's embed script onto their own site and running up that widget's message limit and your API cost. It's best-effort, not a hard security boundary: a request with no `Origin` header (non-browser tools) is let through, since there's nothing to check.
 
 `/api/chat` also rate-limits to `CHAT_RATE_LIMIT_PER_MINUTE` (default 20) requests per minute per widget+IP, returning `429` past that. This is an in-memory limiter, so on Vercel's autoscaling it's per-instance, not perfectly global — good enough to stop one script or browser tab from hammering a widget, not a substitute for a shared store like Redis if you need an exact global limit later.
+
+### Output moderation
+
+Every reply (from `/api/chat` and the admin test-chat) goes through `server/src/moderation.js`: a fixed safety instruction is prepended to every widget's system prompt server-side (so it can't be removed by editing the widget's own prompt), plus a small keyword-based backstop that swaps a reply for a generic fallback message if it matches an obviously disallowed pattern. This is intentionally lightweight — a real moderation model (e.g. OpenAI's `/v1/moderations`) is the recommended upgrade if this handles higher-stakes content later; treat the current backstop as catching the obvious cases, not a comprehensive filter.
 
 ## Run locally
 
@@ -92,13 +97,13 @@ ANTHROPIC_MODEL=claude-sonnet-5
 
 ## Production shape
 
-Done: Postgres persistence, a password-gated admin panel, per-widget message limits, per-widget cost/hours-saved tracking, usage-threshold alerts, a best-effort origin lock, and per-widget+IP rate limiting on `/api/chat`.
+Done: Postgres persistence, a password-gated admin panel, per-widget message limits, per-widget cost/hours-saved tracking, usage-threshold alerts, a best-effort origin lock, per-widget+IP rate limiting on `/api/chat`, an admin test-chat, and baseline output moderation.
 
 Still worth adding before scaling past a handful of customers:
 
 1. Per-admin-user accounts instead of one shared password, if more than one person manages widgets.
 2. A shared store (e.g. Redis) for the chat rate limiter, if you need an exact global limit rather than the current per-instance one.
-3. Moderation on model output before it reaches the customer's visitors.
+3. A real moderation API instead of the keyword-based backstop, if this starts handling higher-stakes content.
 
 ## API
 
@@ -108,6 +113,7 @@ Admin routes require `Authorization: Bearer <ADMIN_PASSWORD>`:
 - `GET /api/admin/widgets` lists every widget with usage (`messagesUsed`, `messageLimit`), estimated `costUsd` and `hoursSaved`, and `embedCode` — powers the dashboard's admin panel.
 - `PATCH /api/admin/widgets/:id` updates any of the same fields (commonly `messageLimit`).
 - `DELETE /api/admin/widgets/:id` removes a widget; its embed starts 404ing immediately.
+- `POST /api/admin/widgets/:id/test-chat` accepts `{ messages }`, returns `{ message }` from that widget's actual prompt/model (moderated same as real replies). Tracked in `costUsd`, not in `messagesUsed`/message limit/alerts.
 
 Public routes, called by `widget.js` from customer sites:
 

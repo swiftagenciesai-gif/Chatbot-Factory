@@ -29,4 +29,11 @@ body { margin: 0; }
 .preview-header { display: flex; justify-content: space-between; padding: 15px 17px; font-weight: 700; }.preview-messages { min-height: 210px; padding: 17px; background: #f8fafc; }.preview-bubble { width: fit-content; max-width: 85%; margin-bottom: 10px; padding: 10px 12px; border-radius: 11px; font-size: 13px; line-height: 1.4; }.assistant-bubble { background: #e8edf0; }.user-bubble { margin-left: auto; }.preview-input { margin: 12px; border: 1px solid #e2e5e7; border-radius: 7px; padding: 10px; color: #9aa19e; font-size: 12px; }.preview-input span { float: right; color: #18212b; font-weight: 700; }.preview-fab { position: absolute; right: 34px; bottom: 34px; display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; box-shadow: 0 10px 25px #4d433533; }
 .code-panel { border-top: 1px solid #d8d5ce; padding-top: 18px; }.copy-button { padding: 7px 10px; color: #69716f; background: transparent; font-size: 12px; }.code-panel textarea { width: 100%; height: 58px; border: 1px solid #d8d5ce; border-radius: 8px; background: #18212b; color: #dce5df; padding: 13px; resize: none; font: 12px monospace; }
 .limit-input { width: 70px; border: 1px solid #d8d5ce; border-radius: 7px; padding: 7px 8px; font-size: 12px; }
+.test-chat { margin-top: 14px; padding-top: 14px; border-top: 1px solid #ececef; }
+.test-chat-messages { max-height: 220px; margin-bottom: 10px; padding: 10px; overflow-y: auto; border: 1px solid #ececef; border-radius: 10px; background: #f9f9fb; display: flex; flex-direction: column; gap: 8px; }
+.test-chat-bubble { max-width: 85%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.4; white-space: pre-wrap; }
+.test-chat-bubble.user { align-self: flex-end; background: #18212b; color: #fff; }
+.test-chat-bubble.assistant { align-self: flex-start; background: #fff; border: 1px solid #e2e3e7; }
+.test-chat form input { flex: 1; min-width: 0; border: 1px solid #d8d5ce; border-radius: 8px; padding: 9px 12px; font: inherit; font-size: 13px; outline: none; }
+.test-chat form input:focus { border-color: #d95d39; }
 @media (max-width: 640px) { .preview-canvas { min-height: 520px; padding: 24px; }.fake-site-title { margin-top: 70px; font-size: 34px; }.preview-widget { right: 20px; bottom: 100px; }.preview-fab { right: 20px; bottom: 22px; } }
