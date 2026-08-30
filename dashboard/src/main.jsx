@@ -182,7 +182,7 @@ function App({ token, initialWidgets, onLogout }) {
         {embedCode && <div className="code-panel mt-9"><div className="mb-3 flex items-center justify-between"><span className="eyebrow">Your embed</span><button className="copy-button" onClick={copy}>{copied ? <Check size={15} /> : <Clipboard size={15} />}{copied ? 'Copied' : 'Copy'}</button></div><textarea readOnly value={embedCode} aria-label="Generated embed code" /></div>}
         <div className="mt-12">
           <div className="mb-3 flex items-center justify-between"><span className="eyebrow">Admin panel &middot; customer widgets</span></div>
-          <p className="mb-4 text-sm text-[#69716f]">Widgets are stored in Postgres and persist across redeploys. Set a message limit per widget to cap what each customer can cost on your LLM key.</p>
+          <p className="mb-4 text-sm text-[#69716f]">Widgets are stored in Postgres and persist across redeploys. Set a message limit per widget to cap what each customer can cost on your LLM key. Cost and hours-saved figures are estimates (based on token usage and 4 min/message respectively), not billing-accurate.</p>
           {widgetsError && <p className="text-sm font-semibold text-[#b3261e]">{widgetsError}</p>}
           {!widgetsError && widgets.length === 0 && <p className="text-sm text-[#69716f]">No widgets yet.</p>}
           <ul className="space-y-3">
@@ -207,6 +207,7 @@ function App({ token, initialWidgets, onLogout }) {
                       <p className="truncate font-semibold">{widget.name}</p>
                       <p className="truncate text-xs text-[#7d817f]">{widget.websiteUrl || 'No website URL set'}</p>
                       <p className="truncate text-xs text-[#7d817f]">{widget.messagesUsed} messages used{widget.messageLimit != null ? ` / ${widget.messageLimit}` : ' (unlimited)'}</p>
+                      <p className="truncate text-xs text-[#7d817f]">~${widget.costUsd.toFixed(4)} cost &middot; ~{widget.hoursSaved}h saved</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <input

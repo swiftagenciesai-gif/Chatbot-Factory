@@ -31,6 +31,7 @@ export const ensureSchema = () => {
       // Added after the table already existed in production - ADD COLUMN IF NOT
       // EXISTS keeps this idempotent for tables created before this column existed.
       await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS opening_message text NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS cost_usd numeric(12,6) NOT NULL DEFAULT 0`;
     })();
   }
   return schemaReady;
@@ -47,6 +48,7 @@ const toWidget = (row) => ({
   openingMessage: row.opening_message,
   messageLimit: row.message_limit,
   messagesUsed: row.messages_used,
+  costUsd: Number(row.cost_usd),
   createdAt: row.created_at
 });
 
@@ -98,7 +100,7 @@ export const deleteWidget = async (id) => {
   await sql`DELETE FROM widgets WHERE id = ${id}`;
 };
 
-export const incrementUsage = async (id) => {
+export const incrementUsage = async (id, costUsd) => {
   await ensureSchema();
-  await sql`UPDATE widgets SET messages_used = messages_used + 1 WHERE id = ${id}`;
+  await sql`UPDATE widgets SET messages_used = messages_used + 1, cost_usd = cost_usd + ${costUsd || 0} WHERE id = ${id}`;
 };
