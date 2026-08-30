@@ -5,9 +5,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage, resetUsage, updateAlertThreshold } from './db.js';
+import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage, incrementCostOnly, resetUsage, updateAlertThreshold } from './db.js';
 import { estimateCostUsd } from './pricing.js';
 import { sendUsageAlert } from './notify.js';
+import { SAFETY_PREFIX, moderateOutput } from './moderation.js';
 
 const app = express();
 // Vercel (and most PaaS) sit in front of the app behind a proxy - without this,
@@ -170,6 +171,7 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
   };
 };
 
+const withSafetyPrefix = (systemPrompt) => `${SAFETY_PREFIX}\n\n${systemPrompt}`;
 const embedCodeFor = (id) => `<script src="${publicBaseUrl}/widget.js" data-widget-id="${id}" async></script>`;
 const withStats = (widget) => ({
   ...widget,
@@ -260,7 +262,7 @@ app.post('/api/chat', requireDatabase, async (request, response) => {
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
   try {
-    const completion = await requestChatCompletion(widget.provider || defaultLlmProvider, widget.systemPrompt, safeMessages);
+    const completion = await requestChatCompletion(widget.provider || defaultLlmProvider, withSafetyPrefix(widget.systemPrompt), safeMessages);
     const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
     const updated = await incrementUsage(widget.id, costUsd);
     if (updated && updated.messageLimit) {
@@ -271,7 +273,27 @@ app.post('/api/chat', requireDatabase, async (request, response) => {
         sendUsageAlert({ widget: updated, messagesUsed: updated.messagesUsed, percentage, threshold: crossed }).catch(() => {});
       }
     }
-    return response.json({ message: completion.message });
+    return response.json({ message: moderateOutput(completion.message) });
+  } catch (error) {
+    const message = error.message || 'Unable to reach the LLM provider.';
+    return response.status(502).json({ error: message });
+  }
+});
+
+app.post('/api/admin/widgets/:id/test-chat', requireAdmin, requireDatabase, async (request, response) => {
+  const { messages } = request.body || {};
+  if (!Array.isArray(messages) || messages.length === 0) return response.status(400).json({ error: 'messages are required.' });
+  if (messages.length > 30) return response.status(400).json({ error: 'Conversation is too long.' });
+
+  const widget = await getWidget(request.params.id);
+  if (!widget) return response.status(404).json({ error: 'Widget not found.' });
+
+  const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
+  try {
+    const completion = await requestChatCompletion(widget.provider || defaultLlmProvider, withSafetyPrefix(widget.systemPrompt), safeMessages);
+    const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
+    await incrementCostOnly(widget.id, costUsd);
+    return response.json({ message: moderateOutput(completion.message) });
   } catch (error) {
     const message = error.message || 'Unable to reach the LLM provider.';
     return response.status(502).json({ error: message });

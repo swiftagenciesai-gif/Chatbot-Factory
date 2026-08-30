@@ -118,6 +118,14 @@ export const incrementUsage = async (id, costUsd) => {
   return rows[0] ? toWidget(rows[0]) : null;
 };
 
+// Used by the admin panel's test-chat: real LLM spend, so it should count
+// toward cost tracking, but it isn't a customer message, so it should not
+// count toward messages_used, the message limit, or usage alerts.
+export const incrementCostOnly = async (id, costUsd) => {
+  await ensureSchema();
+  await sql`UPDATE widgets SET cost_usd = cost_usd + ${costUsd || 0} WHERE id = ${id}`;
+};
+
 export const updateAlertThreshold = async (id, threshold) => {
   await ensureSchema();
   await sql`UPDATE widgets SET last_alert_threshold = ${threshold} WHERE id = ${id}`;
