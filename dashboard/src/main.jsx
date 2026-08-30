@@ -10,6 +10,7 @@ const initial = {
   primaryColor: '#D95D39',
   textColor: '#FFFFFF',
   websiteUrl: '',
+  openingMessage: 'Hi! How can I help you today?',
   messageLimit: ''
 };
 
@@ -139,6 +140,7 @@ function App({ token, initialWidgets, onLogout }) {
           <Field label="Widget name" hint="Shown in the chat header"><input name="name" value={form.name} onChange={update} required /></Field>
           <Field label="System prompt" hint="Sets the assistant's behavior"><textarea name="systemPrompt" rows="4" value={form.systemPrompt} onChange={update} required /></Field>
           <Field label="Website URL" hint="Where this widget will be embedded"><input name="websiteUrl" type="url" placeholder="https://example.com" value={form.websiteUrl} onChange={update} /></Field>
+          <Field label="What would you like the opening message to be?" hint="Shown as the first bubble when chat opens; blank = none"><textarea name="openingMessage" rows="2" placeholder="Hi! How can I help you today?" value={form.openingMessage} onChange={update} /></Field>
           <Field label="Message limit" hint="Blank = unlimited"><input name="messageLimit" type="number" min="0" placeholder="e.g. 500" value={form.messageLimit} onChange={update} /></Field>
           <div className="grid gap-5 sm:grid-cols-2"><ColorField label="Primary color" name="primaryColor" value={form.primaryColor} onChange={handleColorChange} /><ColorField label="Text color" name="textColor" value={form.textColor} onChange={handleColorChange} /></div>
           <button className="primary-button" type="submit"><Code2 size={18} /> Generate embed code</button>
@@ -176,7 +178,7 @@ function App({ token, initialWidgets, onLogout }) {
           </ul>
         </div>
       </section>
-      <section className="preview-wrap lg:pt-20"><div className="preview-label"><span className="live-dot" /> Live preview</div><div className="preview-canvas"><div className="site-lines"><span /><span /><span /></div><div className="fake-site-title">A quieter way to get help.</div><div className="fake-site-copy">Good support should feel close, clear, and human.</div><div className="preview-widget"><div className="preview-header" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><span>{form.name || 'Assistant'}</span><span>×</span></div><div className="preview-messages"><div className="preview-bubble assistant-bubble">Hi, I’m {form.name || 'your assistant'}. How can I help?</div><div className="preview-bubble user-bubble" style={{ backgroundColor: form.primaryColor, color: form.textColor }}>Tell me more</div></div><div className="preview-input">Ask a question... <span>↑</span></div></div><div className="preview-fab" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><MessageCircle size={23} /></div></div></section>
+      <section className="preview-wrap lg:pt-20"><div className="preview-label"><span className="live-dot" /> Live preview</div><div className="preview-canvas"><div className="site-lines"><span /><span /><span /></div><div className="fake-site-title">A quieter way to get help.</div><div className="fake-site-copy">Good support should feel close, clear, and human.</div><div className="preview-widget"><div className="preview-header" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><span>{form.name || 'Assistant'}</span><span>×</span></div><div className="preview-messages"><div className="preview-bubble assistant-bubble">{form.openingMessage || `Hi, I'm ${form.name || 'your assistant'}. How can I help?`}</div><div className="preview-bubble user-bubble" style={{ backgroundColor: form.primaryColor, color: form.textColor }}>Tell me more</div></div><div className="preview-input">Ask a question... <span>↑</span></div></div><div className="preview-fab" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><MessageCircle size={23} /></div></div></section>
     </div>
   </main>;
 }

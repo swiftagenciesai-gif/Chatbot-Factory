@@ -103,7 +103,7 @@ Still worth adding before scaling past a handful of customers:
 
 Admin routes require `Authorization: Bearer <ADMIN_PASSWORD>`:
 
-- `POST /api/admin/widgets` creates a widget from `name`, `systemPrompt`, `primaryColor`, `textColor`, optional `websiteUrl`, optional `messageLimit` (omit/blank for unlimited).
+- `POST /api/admin/widgets` creates a widget from `name`, `systemPrompt`, `primaryColor`, `textColor`, optional `websiteUrl`, optional `openingMessage` (shown as the widget's first bubble; blank = none), optional `messageLimit` (omit/blank for unlimited).
 - `GET /api/admin/widgets` lists every widget with usage (`messagesUsed`, `messageLimit`) and `embedCode` — powers the dashboard's admin panel.
 - `PATCH /api/admin/widgets/:id` updates any of the same fields (commonly `messageLimit`).
 - `DELETE /api/admin/widgets/:id` removes a widget; its embed starts 404ing immediately.

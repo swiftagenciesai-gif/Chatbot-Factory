@@ -13,20 +13,25 @@ let schemaReady = null;
 export const ensureSchema = () => {
   if (!sql) throw new Error('DATABASE_URL is not configured on the server.');
   if (!schemaReady) {
-    schemaReady = sql`
-      CREATE TABLE IF NOT EXISTS widgets (
-        id uuid PRIMARY KEY,
-        provider text NOT NULL,
-        name text NOT NULL,
-        system_prompt text NOT NULL,
-        primary_color text NOT NULL,
-        text_color text NOT NULL,
-        website_url text NOT NULL DEFAULT '',
-        message_limit integer,
-        messages_used integer NOT NULL DEFAULT 0,
-        created_at timestamptz NOT NULL DEFAULT now()
-      )
-    `;
+    schemaReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS widgets (
+          id uuid PRIMARY KEY,
+          provider text NOT NULL,
+          name text NOT NULL,
+          system_prompt text NOT NULL,
+          primary_color text NOT NULL,
+          text_color text NOT NULL,
+          website_url text NOT NULL DEFAULT '',
+          message_limit integer,
+          messages_used integer NOT NULL DEFAULT 0,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+      `;
+      // Added after the table already existed in production - ADD COLUMN IF NOT
+      // EXISTS keeps this idempotent for tables created before this column existed.
+      await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS opening_message text NOT NULL DEFAULT ''`;
+    })();
   }
   return schemaReady;
 };
@@ -39,6 +44,7 @@ const toWidget = (row) => ({
   primaryColor: row.primary_color,
   textColor: row.text_color,
   websiteUrl: row.website_url,
+  openingMessage: row.opening_message,
   messageLimit: row.message_limit,
   messagesUsed: row.messages_used,
   createdAt: row.created_at
@@ -47,8 +53,8 @@ const toWidget = (row) => ({
 export const insertWidget = async (widget) => {
   await ensureSchema();
   const rows = await sql`
-    INSERT INTO widgets (id, provider, name, system_prompt, primary_color, text_color, website_url, message_limit)
-    VALUES (${widget.id}, ${widget.provider}, ${widget.name}, ${widget.systemPrompt}, ${widget.primaryColor}, ${widget.textColor}, ${widget.websiteUrl}, ${widget.messageLimit})
+    INSERT INTO widgets (id, provider, name, system_prompt, primary_color, text_color, website_url, opening_message, message_limit)
+    VALUES (${widget.id}, ${widget.provider}, ${widget.name}, ${widget.systemPrompt}, ${widget.primaryColor}, ${widget.textColor}, ${widget.websiteUrl}, ${widget.openingMessage}, ${widget.messageLimit})
     ON CONFLICT (id) DO NOTHING
     RETURNING *
   `;
@@ -79,6 +85,7 @@ export const updateWidget = async (id, patch) => {
       primary_color = ${next.primaryColor},
       text_color = ${next.textColor},
       website_url = ${next.websiteUrl},
+      opening_message = ${next.openingMessage},
       message_limit = ${next.messageLimit}
     WHERE id = ${id}
     RETURNING *
