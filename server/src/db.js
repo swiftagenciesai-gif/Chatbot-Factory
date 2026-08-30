@@ -32,6 +32,7 @@ export const ensureSchema = () => {
       // EXISTS keeps this idempotent for tables created before this column existed.
       await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS opening_message text NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS cost_usd numeric(12,6) NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE widgets ADD COLUMN IF NOT EXISTS last_alert_threshold integer NOT NULL DEFAULT 0`;
     })();
   }
   return schemaReady;
@@ -49,6 +50,7 @@ const toWidget = (row) => ({
   messageLimit: row.message_limit,
   messagesUsed: row.messages_used,
   costUsd: Number(row.cost_usd),
+  lastAlertThreshold: row.last_alert_threshold,
   createdAt: row.created_at
 });
 
@@ -80,6 +82,9 @@ export const updateWidget = async (id, patch) => {
   const current = await getWidget(id);
   if (!current) return null;
   const next = { ...current, ...patch };
+  // A changed message_limit invalidates any threshold already alerted on,
+  // since the percentage basis just changed.
+  const resetAlert = patch.messageLimit !== undefined && patch.messageLimit !== current.messageLimit;
   const rows = await sql`
     UPDATE widgets SET
       name = ${next.name},
@@ -88,7 +93,8 @@ export const updateWidget = async (id, patch) => {
       text_color = ${next.textColor},
       website_url = ${next.websiteUrl},
       opening_message = ${next.openingMessage},
-      message_limit = ${next.messageLimit}
+      message_limit = ${next.messageLimit},
+      last_alert_threshold = ${resetAlert ? 0 : current.lastAlertThreshold}
     WHERE id = ${id}
     RETURNING *
   `;
@@ -102,11 +108,17 @@ export const deleteWidget = async (id) => {
 
 export const resetUsage = async (id) => {
   await ensureSchema();
-  const rows = await sql`UPDATE widgets SET messages_used = 0, cost_usd = 0 WHERE id = ${id} RETURNING *`;
+  const rows = await sql`UPDATE widgets SET messages_used = 0, cost_usd = 0, last_alert_threshold = 0 WHERE id = ${id} RETURNING *`;
   return rows[0] ? toWidget(rows[0]) : null;
 };
 
 export const incrementUsage = async (id, costUsd) => {
   await ensureSchema();
-  await sql`UPDATE widgets SET messages_used = messages_used + 1, cost_usd = cost_usd + ${costUsd || 0} WHERE id = ${id}`;
+  const rows = await sql`UPDATE widgets SET messages_used = messages_used + 1, cost_usd = cost_usd + ${costUsd || 0} WHERE id = ${id} RETURNING *`;
+  return rows[0] ? toWidget(rows[0]) : null;
+};
+
+export const updateAlertThreshold = async (id, threshold) => {
+  await ensureSchema();
+  await sql`UPDATE widgets SET last_alert_threshold = ${threshold} WHERE id = ${id}`;
 };
