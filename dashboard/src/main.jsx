@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, Clipboard, Code2, MessageCircle, Sparkles } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
@@ -8,7 +8,8 @@ const initial = {
   name: 'Nova',
   systemPrompt: 'You are a thoughtful, concise customer support assistant. Be warm, useful, and honest when you do not know something.',
   primaryColor: '#D95D39',
-  textColor: '#FFFFFF'
+  textColor: '#FFFFFF',
+  websiteUrl: ''
 };
 
 const isValidHexColor = (value) => /^#[0-9A-Fa-f]{6}$/.test(String(value || ''));
@@ -18,6 +19,19 @@ function App() {
   const [embedCode, setEmbedCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState('');
+  const [widgets, setWidgets] = useState([]);
+  const [widgetsError, setWidgetsError] = useState('');
+
+  const loadWidgets = async () => {
+    try {
+      const response = await fetch('/api/widgets');
+      if (!response.ok) throw new Error('Could not load widgets.');
+      setWidgets(await response.json());
+      setWidgetsError('');
+    } catch (error) { setWidgetsError(error.message || 'Could not load widgets.'); }
+  };
+
+  useEffect(() => { loadWidgets(); }, []);
 
   const update = (event) => setForm({ ...form, [event.target.name]: event.target.value });
   const isColorField = (name) => name === 'primaryColor' || name === 'textColor';
@@ -44,9 +58,11 @@ function App() {
       if (!response.ok) throw new Error(data.error);
       setEmbedCode(data.embedCode);
       setStatus('Widget ready to ship.');
+      loadWidgets();
     } catch (error) { setStatus(error.message || 'Could not create widget.'); }
   };
   const copy = async () => { await navigator.clipboard.writeText(embedCode); setCopied(true); setTimeout(() => setCopied(false), 1800); };
+  const copyText = async (text) => { await navigator.clipboard.writeText(text); };
 
   return <main className="min-h-screen bg-[#f5f1eb] text-[#18212b]">
     <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-7 lg:px-10">
@@ -62,11 +78,29 @@ function App() {
           <Field label="AI provider" hint="Model backend"><select name="provider" value={form.provider} onChange={update}><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option></select></Field>
           <Field label="Widget name" hint="Shown in the chat header"><input name="name" value={form.name} onChange={update} required /></Field>
           <Field label="System prompt" hint="Sets the assistant's behavior"><textarea name="systemPrompt" rows="4" value={form.systemPrompt} onChange={update} required /></Field>
+          <Field label="Website URL" hint="Where this widget will be embedded"><input name="websiteUrl" type="url" placeholder="https://example.com" value={form.websiteUrl} onChange={update} /></Field>
           <div className="grid gap-5 sm:grid-cols-2"><ColorField label="Primary color" name="primaryColor" value={form.primaryColor} onChange={handleColorChange} /><ColorField label="Text color" name="textColor" value={form.textColor} onChange={handleColorChange} /></div>
           <button className="primary-button" type="submit"><Code2 size={18} /> Generate embed code</button>
           {status && <p className="text-sm font-semibold text-[#69716f]">{status}</p>}
         </form>
         {embedCode && <div className="code-panel mt-9"><div className="mb-3 flex items-center justify-between"><span className="eyebrow">Your embed</span><button className="copy-button" onClick={copy}>{copied ? <Check size={15} /> : <Clipboard size={15} />}{copied ? 'Copied' : 'Copy'}</button></div><textarea readOnly value={embedCode} aria-label="Generated embed code" /></div>}
+        <div className="mt-12">
+          <div className="mb-3 flex items-center justify-between"><span className="eyebrow">Admin panel &middot; existing widgets</span></div>
+          <p className="mb-4 text-sm text-[#69716f]">Widgets live in server memory, not a database yet, so this list resets on every redeploy or cold start &mdash; see the README.</p>
+          {widgetsError && <p className="text-sm font-semibold text-[#b3261e]">{widgetsError}</p>}
+          {!widgetsError && widgets.length === 0 && <p className="text-sm text-[#69716f]">No widgets yet.</p>}
+          <ul className="space-y-3">
+            {widgets.map((widget) => (
+              <li key={widget.id} className="widget-row flex items-center justify-between gap-4 rounded-xl border border-[#e7e0d4] bg-white px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{widget.name}</p>
+                  <p className="truncate text-xs text-[#7d817f]">{widget.websiteUrl || 'No website URL set'}</p>
+                </div>
+                <button type="button" className="copy-button shrink-0" onClick={() => copyText(widget.embedCode)}><Clipboard size={14} /> Copy embed</button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
       <section className="preview-wrap lg:pt-20"><div className="preview-label"><span className="live-dot" /> Live preview</div><div className="preview-canvas"><div className="site-lines"><span /><span /><span /></div><div className="fake-site-title">A quieter way to get help.</div><div className="fake-site-copy">Good support should feel close, clear, and human.</div><div className="preview-widget"><div className="preview-header" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><span>{form.name || 'Assistant'}</span><span>×</span></div><div className="preview-messages"><div className="preview-bubble assistant-bubble">Hi, I’m {form.name || 'your assistant'}. How can I help?</div><div className="preview-bubble user-bubble" style={{ backgroundColor: form.primaryColor, color: form.textColor }}>Tell me more</div></div><div className="preview-input">Ask a question... <span>↑</span></div></div><div className="preview-fab" style={{ backgroundColor: form.primaryColor, color: form.textColor }}><MessageCircle size={23} /></div></div></section>
     </div>

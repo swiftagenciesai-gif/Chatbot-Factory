@@ -1,6 +1,7 @@
 {
   "name": "ai-chatbot-widget-factory",
   "private": true,
+  "type": "module",
   "workspaces": ["dashboard", "server"],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace server\" \"npm run dev --workspace dashboard\"",
