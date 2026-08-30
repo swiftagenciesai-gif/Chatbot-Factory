@@ -59,12 +59,14 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
       max_tokens: 1024,
       messages: messages.map(({ role, content }) => ({ role, content: String(content || '') }))
     };
+    const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
     const response = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
+        'anthropic-version': '2023-06-01',
+        ...(workspaceId ? { 'anthropic-workspace-id': workspaceId } : {})
       },
       body: JSON.stringify(body)
     });

@@ -46,6 +46,9 @@ LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your_key
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 ANTHROPIC_MODEL=claude-sonnet-5
+# Only needed for an "identity-linked" API key (tied to your Console login).
+# Find it in the Anthropic Console under Settings -> Workspaces.
+ANTHROPIC_WORKSPACE_ID=
 ```
 
 ## Production shape
