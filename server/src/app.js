@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage } from './db.js';
 
 const app = express();
 const publicBaseUrl = (
@@ -12,7 +13,6 @@ const publicBaseUrl = (
   (process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`) ||
   `http://localhost:${process.env.PORT || 3001}`
 ).replace(/\/$/, '');
-const widgets = new Map();
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/widget.js');
 const defaultLlmProvider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
 
@@ -31,24 +31,59 @@ const cleanWebsiteUrl = (value) => {
     return '';
   }
 };
+const cleanMessageLimit = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+};
 
-// Widgets normally live only in this in-memory Map, which is wiped on every
-// serverless cold start and every redeploy (see README "Production shape").
-// SEED_WIDGET_ID pins one widget to a fixed id/config so at least one embed
-// keeps working across restarts without needing a database.
-const seedWidgetId = process.env.SEED_WIDGET_ID;
-if (seedWidgetId) {
-  widgets.set(seedWidgetId, {
-    id: seedWidgetId,
-    provider: validProvider(process.env.SEED_WIDGET_PROVIDER) ? process.env.SEED_WIDGET_PROVIDER.toLowerCase() : defaultLlmProvider,
-    name: cleanText(process.env.SEED_WIDGET_NAME, 'Assistant', 60),
-    systemPrompt: cleanText(process.env.SEED_WIDGET_SYSTEM_PROMPT, 'You are a helpful assistant.', 4000),
-    primaryColor: validHex(process.env.SEED_WIDGET_PRIMARY_COLOR) ? process.env.SEED_WIDGET_PRIMARY_COLOR : '#D95D39',
-    textColor: validHex(process.env.SEED_WIDGET_TEXT_COLOR) ? process.env.SEED_WIDGET_TEXT_COLOR : '#FFFFFF',
-    websiteUrl: cleanWebsiteUrl(process.env.SEED_WIDGET_WEBSITE_URL),
-    createdAt: new Date(0).toISOString()
-  });
-}
+const timingSafeEqual = (a, b) => {
+  const bufA = crypto.createHash('sha256').update(String(a)).digest();
+  const bufB = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(bufA, bufB);
+};
+
+const requireAdmin = (request, response, next) => {
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminPassword) return response.status(500).json({ error: 'ADMIN_PASSWORD is not configured on the server.' });
+  const header = request.get('authorization') || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token || !timingSafeEqual(token, adminPassword)) {
+    return response.status(401).json({ error: 'Invalid admin password.' });
+  }
+  return next();
+};
+
+const requireDatabase = async (request, response, next) => {
+  if (!hasDatabase()) return response.status(500).json({ error: 'DATABASE_URL is not configured on the server.' });
+  await seedWidgetOnce();
+  return next();
+};
+
+// A one-time migration path: if SEED_WIDGET_ID is set and that widget does
+// not already exist in the database, create it there. Once inserted, the
+// widget lives permanently in Postgres and this seed is a no-op forever
+// after - see README "Persistence".
+const seedWidgetOnce = async () => {
+  const seedWidgetId = process.env.SEED_WIDGET_ID;
+  if (!seedWidgetId || !hasDatabase()) return;
+  try {
+    const existing = await getWidget(seedWidgetId);
+    if (existing) return;
+    await insertWidget({
+      id: seedWidgetId,
+      provider: validProvider(process.env.SEED_WIDGET_PROVIDER) ? process.env.SEED_WIDGET_PROVIDER.toLowerCase() : defaultLlmProvider,
+      name: cleanText(process.env.SEED_WIDGET_NAME, 'Assistant', 60),
+      systemPrompt: cleanText(process.env.SEED_WIDGET_SYSTEM_PROMPT, 'You are a helpful assistant.', 4000),
+      primaryColor: validHex(process.env.SEED_WIDGET_PRIMARY_COLOR) ? process.env.SEED_WIDGET_PRIMARY_COLOR : '#D95D39',
+      textColor: validHex(process.env.SEED_WIDGET_TEXT_COLOR) ? process.env.SEED_WIDGET_TEXT_COLOR : '#FFFFFF',
+      websiteUrl: cleanWebsiteUrl(process.env.SEED_WIDGET_WEBSITE_URL),
+      messageLimit: cleanMessageLimit(process.env.SEED_WIDGET_MESSAGE_LIMIT)
+    });
+  } catch {
+    // Best-effort: a failed seed should not crash requests that don't need it.
+  }
+};
 
 const requestChatCompletion = async (provider, systemPrompt, messages) => {
   if (provider === 'anthropic') {
@@ -92,17 +127,20 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
   return result.choices?.[0]?.message?.content || 'I could not produce a response.';
 };
 
-app.get('/health', (_request, response) => response.json({ ok: true }));
+const embedCodeFor = (id) => `<script src="${publicBaseUrl}/widget.js" data-widget-id="${id}" async></script>`;
 
-app.post('/api/widgets', (request, response) => {
+app.get('/health', (_request, response) => response.json({ ok: true, database: hasDatabase() }));
+
+// --- Admin routes: password-gated, used by the factory dashboard to provision and manage customer widgets. ---
+
+app.post('/api/admin/widgets', requireAdmin, requireDatabase, async (request, response) => {
   const body = request.body || {};
   if (!validHex(body.primaryColor) || !validHex(body.textColor)) {
     return response.status(400).json({ error: 'Colors must be six-digit hex values.' });
   }
   const provider = validProvider(body.provider) ? body.provider.toLowerCase() : defaultLlmProvider;
-
   const id = crypto.randomUUID();
-  const widget = {
+  const widget = await insertWidget({
     id,
     provider,
     name: cleanText(body.name, 'Assistant', 60),
@@ -110,41 +148,59 @@ app.post('/api/widgets', (request, response) => {
     primaryColor: body.primaryColor,
     textColor: body.textColor,
     websiteUrl: cleanWebsiteUrl(body.websiteUrl),
-    createdAt: new Date().toISOString()
-  };
-  widgets.set(id, widget);
-  return response.status(201).json({ ...widget, embedCode: `<script src="${publicBaseUrl}/widget.js" data-widget-id="${id}" async></script>` });
+    messageLimit: cleanMessageLimit(body.messageLimit)
+  });
+  return response.status(201).json({ ...widget, embedCode: embedCodeFor(widget.id) });
 });
 
-app.get('/api/widgets', (_request, response) => {
-  const list = [...widgets.values()]
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .map(({ id, name, websiteUrl, createdAt }) => ({
-      id,
-      name,
-      websiteUrl,
-      createdAt,
-      embedCode: `<script src="${publicBaseUrl}/widget.js" data-widget-id="${id}" async></script>`
-    }));
-  return response.json(list);
+app.get('/api/admin/widgets', requireAdmin, requireDatabase, async (_request, response) => {
+  const widgets = await listWidgets();
+  return response.json(widgets.map((widget) => ({ ...widget, embedCode: embedCodeFor(widget.id) })));
 });
 
-app.get('/api/widgets/:id', (request, response) => {
-  const widget = widgets.get(request.params.id);
+app.patch('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (request, response) => {
+  const body = request.body || {};
+  const patch = {};
+  if (body.name !== undefined) patch.name = cleanText(body.name, 'Assistant', 60);
+  if (body.systemPrompt !== undefined) patch.systemPrompt = cleanText(body.systemPrompt, 'You are a helpful assistant.', 4000);
+  if (body.websiteUrl !== undefined) patch.websiteUrl = cleanWebsiteUrl(body.websiteUrl);
+  if (body.messageLimit !== undefined) patch.messageLimit = cleanMessageLimit(body.messageLimit);
+  if (body.primaryColor !== undefined && validHex(body.primaryColor)) patch.primaryColor = body.primaryColor;
+  if (body.textColor !== undefined && validHex(body.textColor)) patch.textColor = body.textColor;
+  const widget = await updateWidget(request.params.id, patch);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
-  const { systemPrompt: _systemPrompt, provider: _provider, ...publicConfig } = widget;
+  return response.json({ ...widget, embedCode: embedCodeFor(widget.id) });
+});
+
+app.delete('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (request, response) => {
+  await deleteWidget(request.params.id);
+  return response.status(204).end();
+});
+
+// --- Public routes: called by widget.js from customer sites, so no admin auth here. ---
+
+app.get('/api/widgets/:id', requireDatabase, async (request, response) => {
+  const widget = await getWidget(request.params.id);
+  if (!widget) return response.status(404).json({ error: 'Widget not found.' });
+  const { systemPrompt: _systemPrompt, provider: _provider, messageLimit: _messageLimit, messagesUsed: _messagesUsed, ...publicConfig } = widget;
   return response.json(publicConfig);
 });
 
-app.post('/api/chat', async (request, response) => {
+app.post('/api/chat', requireDatabase, async (request, response) => {
   const { widgetId, messages } = request.body || {};
-  const widget = widgets.get(widgetId);
-  if (!widget || !Array.isArray(messages) || messages.length === 0) return response.status(400).json({ error: 'A valid widgetId and messages are required.' });
+  if (!widgetId || !Array.isArray(messages) || messages.length === 0) return response.status(400).json({ error: 'A valid widgetId and messages are required.' });
   if (messages.length > 30) return response.status(400).json({ error: 'Conversation is too long.' });
+
+  const widget = await getWidget(widgetId);
+  if (!widget) return response.status(400).json({ error: 'A valid widgetId and messages are required.' });
+  if (widget.messageLimit !== null && widget.messagesUsed >= widget.messageLimit) {
+    return response.status(402).json({ error: 'This widget has reached its message limit. Contact the site owner to increase it.' });
+  }
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
   try {
     const message = await requestChatCompletion(widget.provider || defaultLlmProvider, widget.systemPrompt, safeMessages);
+    await incrementUsage(widget.id);
     return response.json({ message });
   } catch (error) {
     const message = error.message || 'Unable to reach the LLM provider.';
