@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hasDatabase, insertWidget, listWidgets, getWidget, updateWidget, deleteWidget, incrementUsage } from './db.js';
+import { estimateCostUsd } from './pricing.js';
 
 const app = express();
 const publicBaseUrl = (
@@ -15,6 +16,9 @@ const publicBaseUrl = (
 ).replace(/\/$/, '');
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/widget.js');
 const defaultLlmProvider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+// Estimated human minutes a handled message would otherwise take a person to
+// answer - used only to compute the "hours saved" figure shown per widget.
+const minutesSavedPerMessage = Number(process.env.MINUTES_SAVED_PER_MESSAGE) || 4;
 
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
@@ -54,36 +58,9 @@ const requireAdmin = (request, response, next) => {
   return next();
 };
 
-const requireDatabase = async (request, response, next) => {
+const requireDatabase = (request, response, next) => {
   if (!hasDatabase()) return response.status(500).json({ error: 'DATABASE_URL is not configured on the server.' });
-  await seedWidgetOnce();
   return next();
-};
-
-// A one-time migration path: if SEED_WIDGET_ID is set and that widget does
-// not already exist in the database, create it there. Once inserted, the
-// widget lives permanently in Postgres and this seed is a no-op forever
-// after - see README "Persistence".
-const seedWidgetOnce = async () => {
-  const seedWidgetId = process.env.SEED_WIDGET_ID;
-  if (!seedWidgetId || !hasDatabase()) return;
-  try {
-    const existing = await getWidget(seedWidgetId);
-    if (existing) return;
-    await insertWidget({
-      id: seedWidgetId,
-      provider: validProvider(process.env.SEED_WIDGET_PROVIDER) ? process.env.SEED_WIDGET_PROVIDER.toLowerCase() : defaultLlmProvider,
-      name: cleanText(process.env.SEED_WIDGET_NAME, 'Assistant', 60),
-      systemPrompt: cleanText(process.env.SEED_WIDGET_SYSTEM_PROMPT, 'You are a helpful assistant.', 4000),
-      primaryColor: validHex(process.env.SEED_WIDGET_PRIMARY_COLOR) ? process.env.SEED_WIDGET_PRIMARY_COLOR : '#D95D39',
-      textColor: validHex(process.env.SEED_WIDGET_TEXT_COLOR) ? process.env.SEED_WIDGET_TEXT_COLOR : '#FFFFFF',
-      websiteUrl: cleanWebsiteUrl(process.env.SEED_WIDGET_WEBSITE_URL),
-      openingMessage: cleanText(process.env.SEED_WIDGET_OPENING_MESSAGE, '', 500),
-      messageLimit: cleanMessageLimit(process.env.SEED_WIDGET_MESSAGE_LIMIT)
-    });
-  } catch {
-    // Best-effort: a failed seed should not crash requests that don't need it.
-  }
 };
 
 const requestChatCompletion = async (provider, systemPrompt, messages) => {
@@ -91,8 +68,9 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('Anthropic API key is not configured on the server.');
     const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
+    const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
     const body = {
-      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
+      model,
       system: systemPrompt,
       max_tokens: 1024,
       messages: messages.map(({ role, content }) => ({ role, content: String(content || '') }))
@@ -111,17 +89,23 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
       throw new Error(`Anthropic request failed (${response.status}): ${detail.slice(0, 300)}`);
     }
     const result = await response.json();
-    return result.content?.[0]?.text || 'I could not produce a response.';
+    return {
+      message: result.content?.[0]?.text || 'I could not produce a response.',
+      model,
+      inputTokens: result.usage?.input_tokens || 0,
+      outputTokens: result.usage?.output_tokens || 0
+    };
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OpenAI API key is not configured on the server.');
   const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      model,
       temperature: 0.7,
       messages: [{ role: 'system', content: systemPrompt }, ...messages]
     })
@@ -131,10 +115,20 @@ const requestChatCompletion = async (provider, systemPrompt, messages) => {
     throw new Error(`OpenAI request failed (${response.status}): ${detail.slice(0, 300)}`);
   }
   const result = await response.json();
-  return result.choices?.[0]?.message?.content || 'I could not produce a response.';
+  return {
+    message: result.choices?.[0]?.message?.content || 'I could not produce a response.',
+    model,
+    inputTokens: result.usage?.prompt_tokens || 0,
+    outputTokens: result.usage?.completion_tokens || 0
+  };
 };
 
 const embedCodeFor = (id) => `<script src="${publicBaseUrl}/widget.js" data-widget-id="${id}" async></script>`;
+const withStats = (widget) => ({
+  ...widget,
+  embedCode: embedCodeFor(widget.id),
+  hoursSaved: Math.round(((widget.messagesUsed * minutesSavedPerMessage) / 60) * 10) / 10
+});
 
 app.get('/health', (_request, response) => response.json({ ok: true, database: hasDatabase() }));
 
@@ -158,12 +152,12 @@ app.post('/api/admin/widgets', requireAdmin, requireDatabase, async (request, re
     openingMessage: cleanText(body.openingMessage, '', 500),
     messageLimit: cleanMessageLimit(body.messageLimit)
   });
-  return response.status(201).json({ ...widget, embedCode: embedCodeFor(widget.id) });
+  return response.status(201).json(withStats(widget));
 });
 
 app.get('/api/admin/widgets', requireAdmin, requireDatabase, async (_request, response) => {
   const widgets = await listWidgets();
-  return response.json(widgets.map((widget) => ({ ...widget, embedCode: embedCodeFor(widget.id) })));
+  return response.json(widgets.map(withStats));
 });
 
 app.patch('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (request, response) => {
@@ -178,7 +172,7 @@ app.patch('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (reques
   if (body.textColor !== undefined && validHex(body.textColor)) patch.textColor = body.textColor;
   const widget = await updateWidget(request.params.id, patch);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
-  return response.json({ ...widget, embedCode: embedCodeFor(widget.id) });
+  return response.json(withStats(widget));
 });
 
 app.delete('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (request, response) => {
@@ -191,7 +185,7 @@ app.delete('/api/admin/widgets/:id', requireAdmin, requireDatabase, async (reque
 app.get('/api/widgets/:id', requireDatabase, async (request, response) => {
   const widget = await getWidget(request.params.id);
   if (!widget) return response.status(404).json({ error: 'Widget not found.' });
-  const { systemPrompt: _systemPrompt, provider: _provider, messageLimit: _messageLimit, messagesUsed: _messagesUsed, ...publicConfig } = widget;
+  const { systemPrompt: _systemPrompt, provider: _provider, messageLimit: _messageLimit, messagesUsed: _messagesUsed, costUsd: _costUsd, ...publicConfig } = widget;
   return response.json(publicConfig);
 });
 
@@ -208,9 +202,10 @@ app.post('/api/chat', requireDatabase, async (request, response) => {
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
   try {
-    const message = await requestChatCompletion(widget.provider || defaultLlmProvider, widget.systemPrompt, safeMessages);
-    await incrementUsage(widget.id);
-    return response.json({ message });
+    const completion = await requestChatCompletion(widget.provider || defaultLlmProvider, widget.systemPrompt, safeMessages);
+    const costUsd = estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens);
+    await incrementUsage(widget.id, costUsd);
+    return response.json({ message: completion.message });
   } catch (error) {
     const message = error.message || 'Unable to reach the LLM provider.';
     return response.status(502).json({ error: message });

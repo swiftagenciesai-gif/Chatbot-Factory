@@ -28,18 +28,7 @@ Customer site <- generated <script data-widget-id="..." src=".../widget.js">
 
 ### Persistence
 
-Widgets are stored in a `widgets` Postgres table (created automatically on first use) and survive redeploys and cold starts. If you were previously relying on `SEED_WIDGET_*` env vars as a stopgap before this table existed, keep them set for one more deploy — `server/src/app.js` will insert that widget into Postgres the first time an admin route runs, then it lives there permanently and the env vars are no longer read after that. Optional `SEED_WIDGET_MESSAGE_LIMIT` sets its initial limit.
-
-```bash
-SEED_WIDGET_ID=ad79af17-756c-411c-a324-63dbfcec6158
-SEED_WIDGET_NAME="Swift Agencies Concierge"
-SEED_WIDGET_SYSTEM_PROMPT="You are the concierge for Swift Agencies..."
-SEED_WIDGET_PRIMARY_COLOR=#D95D39
-SEED_WIDGET_TEXT_COLOR=#FFFFFF
-SEED_WIDGET_WEBSITE_URL=https://swift-delta-one.vercel.app
-SEED_WIDGET_PROVIDER=anthropic
-SEED_WIDGET_MESSAGE_LIMIT=2000
-```
+Widgets are stored in a `widgets` Postgres table (created automatically on first use) and survive redeploys and cold starts. The `SEED_WIDGET_*` env-var migration path used before this table existed has been removed — every widget now only exists because it was created (or is still present) in the database, so deleting one in the admin panel is permanent. If you still have `SEED_WIDGET_*` variables set in Vercel, they're simply unread now and can be removed whenever convenient.
 
 ### Admin panel
 
@@ -47,8 +36,10 @@ The dashboard at your Production domain is a password gate first (enter `ADMIN_P
 
 - messages used vs. its message limit (blank/unlimited if not set)
 - an inline field to change that limit at any time
+- estimated **cost** (`~$X.XXXX`, from actual token usage × the per-model rate table in `server/src/pricing.js`) and estimated **hours saved** (`messagesUsed × MINUTES_SAVED_PER_MESSAGE ÷ 60`, default 4 minutes/message, override via the `MINUTES_SAVED_PER_MESSAGE` env var) — both are estimates for budgeting/marketing, not billing-accurate figures
+- **Edit** — change name, system prompt, opening message, website URL, or colors in place
 - a copy-embed button (re-copy a customer's script tag without recreating their widget)
-- delete (immediately breaks that widget's embed — customer sites calling it will get a 404)
+- delete (immediately and permanently breaks that widget's embed — customer sites calling it will get a 404; nothing recreates it afterward)
 
 The password is kept in `sessionStorage` only (cleared when the tab closes); there is no per-admin-user login, just the one shared password. Good enough for one operator; add real auth (e.g. per-user accounts) before handing dashboard access to a team.
 
@@ -104,7 +95,7 @@ Still worth adding before scaling past a handful of customers:
 Admin routes require `Authorization: Bearer <ADMIN_PASSWORD>`:
 
 - `POST /api/admin/widgets` creates a widget from `name`, `systemPrompt`, `primaryColor`, `textColor`, optional `websiteUrl`, optional `openingMessage` (shown as the widget's first bubble; blank = none), optional `messageLimit` (omit/blank for unlimited).
-- `GET /api/admin/widgets` lists every widget with usage (`messagesUsed`, `messageLimit`) and `embedCode` — powers the dashboard's admin panel.
+- `GET /api/admin/widgets` lists every widget with usage (`messagesUsed`, `messageLimit`), estimated `costUsd` and `hoursSaved`, and `embedCode` — powers the dashboard's admin panel.
 - `PATCH /api/admin/widgets/:id` updates any of the same fields (commonly `messageLimit`).
 - `DELETE /api/admin/widgets/:id` removes a widget; its embed starts 404ing immediately.
 
