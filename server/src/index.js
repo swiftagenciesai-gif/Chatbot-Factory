@@ -112,4 +112,8 @@ app.get('/widget.js', async (_request, response) => {
   response.type('application/javascript').send(await fs.readFile(widgetPath, 'utf8'));
 });
 
-app.listen(port, () => console.log(`Widget Factory API listening on ${publicBaseUrl}`));
+if (!process.env.VERCEL) {
+  app.listen(port, () => console.log(`Widget Factory API listening on ${publicBaseUrl}`));
+}
+
+export default app;
