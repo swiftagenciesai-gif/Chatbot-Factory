@@ -11,12 +11,55 @@ const port = Number(process.env.PORT || 3001);
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${port}`;
 const widgets = new Map();
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/widget.js');
+const llmProvider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
 
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
 
 const validHex = (value) => /^#[0-9a-f]{6}$/i.test(value || '');
 const cleanText = (value, fallback, max) => String(value || fallback).trim().slice(0, max);
+
+const requestChatCompletion = async (provider, systemPrompt, messages) => {
+  if (provider === 'anthropic') {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('Anthropic API key is not configured on the server.');
+    const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
+    const body = {
+      model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest',
+      system: systemPrompt,
+      max_tokens: 1024,
+      messages: messages.map(({ role, content }) => ({ role, content: String(content || '') }))
+    };
+    const response = await fetch(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error('Anthropic request failed.');
+    const result = await response.json();
+    return result.content?.[0]?.text || 'I could not produce a response.';
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OpenAI API key is not configured on the server.');
+  const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      temperature: 0.7,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages]
+    })
+  });
+  if (!response.ok) throw new Error('OpenAI request failed.');
+  const result = await response.json();
+  return result.choices?.[0]?.message?.content || 'I could not produce a response.';
+};
 
 app.get('/health', (_request, response) => response.json({ ok: true }));
 
@@ -53,19 +96,12 @@ app.post('/api/chat', async (request, response) => {
   if (messages.length > 30) return response.status(400).json({ error: 'Conversation is too long.' });
 
   const safeMessages = messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content || '').slice(0, 4000) }));
-  if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'The LLM API key is not configured on the server.' });
-
   try {
-    const llmResponse = await fetch(`${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-4o-mini', temperature: 0.7, messages: [{ role: 'system', content: widget.systemPrompt }, ...safeMessages] })
-    });
-    if (!llmResponse.ok) return response.status(502).json({ error: 'The LLM provider returned an error.' });
-    const result = await llmResponse.json();
-    return response.json({ message: result.choices?.[0]?.message?.content || 'I could not produce a response.' });
-  } catch {
-    return response.status(502).json({ error: 'Unable to reach the LLM provider.' });
+    const message = await requestChatCompletion(llmProvider, widget.systemPrompt, safeMessages);
+    return response.json({ message });
+  } catch (error) {
+    const message = error.message || 'Unable to reach the LLM provider.';
+    return response.status(502).json({ error: message });
   }
 });
 

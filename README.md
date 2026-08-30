@@ -29,7 +29,24 @@ npm run dev
 
 Open `http://localhost:5173`. The dashboard proxies API requests to `http://localhost:3001`.
 
-Set `OPENAI_API_KEY` in `server/.env`. The key never appears in a generated snippet or in browser code. `OPENAI_BASE_URL` may point at any OpenAI-compatible endpoint.
+Set the LLM credentials in `server/.env`. The key never appears in a generated snippet or in browser code.
+
+For OpenAI:
+
+```bash
+OPENAI_API_KEY=your_key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+```
+
+For Claude via Anthropic:
+
+```bash
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_key
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+```
 
 ## Production shape
 
